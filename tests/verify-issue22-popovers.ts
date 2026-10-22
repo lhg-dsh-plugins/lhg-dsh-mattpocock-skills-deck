@@ -1,0 +1,71 @@
+// verify-issue22-popovers.ts — issue #22 浮层脱离状态栏裁剪契约
+// 用法: node tests/verify-issue22-popovers.ts [file...]
+//
+// 行为 seam：BUG 新增菜单与技能列表必须是 body-level overlay；
+// 布局 wrapper 继续保留横向裁剪职责，但不得再承载向上展开的弹层。
+const fs = require('fs')
+const files = process.argv.slice(2)
+const targets = files.length ? files : ['client.js', 'package/lib/client.js']
+let failed = false
+
+const check = function (file) {
+  const src = fs.readFileSync(file, 'utf8')
+  const problems = []
+  const requireText = (re, message) => { if (!re.test(src)) problems.push(message) }
+
+  // 两个交互浮层都必须走既有的 body portal seam。
+  // 字面量写成 ['"]x["']（两种引号都认）：产物是构建出来的，esbuild 统一把字符串输出成双引号；
+  //   手写真源（src/client/floating/*.ts 与 src/client/statusbar/StatusMenus.ts）写的是单引号。
+  //   要求的三样（PortalOverlay → portalTop(h('div'))、两处 className 调 PortalOverlay）一个字没少。
+  requireText(/const PortalOverlay\s*=\s*function[\s\S]{0,180}return portalTop\(h\(["']div["']/, 'PortalOverlay 未委托给 portalTop')
+  requireText(/PortalOverlay\(\{\s*className:\s*["']dsws-bugmenu["']/, 'BUG 菜单未通过 PortalOverlay 渲染')
+  requireText(/PortalOverlay\(\{\s*className:\s*["']dsws-skillpop-bridge["']/, '技能列表未通过 PortalOverlay 渲染')
+
+  // overlay 必须使用 viewport 定位和全局层级，不能继续使用 absolute + 9999。
+  requireText(/dsws-bugmenu[\s\S]{0,500}position:\s*["']fixed["']/, 'BUG 菜单缺 position:fixed')
+  requireText(/dsws-skillpop[\s\S]{0,500}position:\s*["']fixed["']/, '技能列表缺 position:fixed')
+  // 全局层级这一条判据没变（仍然必须正好等于 2147483000），变的是比法：esbuild 会把 2147483000
+  //   印成数值等价的短写法 2147483e3，所以先把数字面量抓出来再用 Number() 比数值，而不是比字面文本。
+  //   这样层级被改小（例如退回 9999）照样掀红。
+  const GLOBAL_Z_INDEX = 2147483000
+  const zIndexOf = (slot) => {
+    const m = new RegExp(slot + '[\\s\\S]{0,500}zIndex:\\s*([0-9][0-9a-zA-Z.+-]*)').exec(src)
+    return m ? Number(m[1]) : NaN
+  }
+  if (zIndexOf('dsws-bugmenu') !== GLOBAL_Z_INDEX) problems.push('BUG 菜单缺全局 z-index')
+  if (zIndexOf('dsws-skillpop') !== GLOBAL_Z_INDEX) problems.push('技能列表缺全局 z-index')
+
+  // 定位必须从锚点 rect 得出，并在滚动/缩放后更新。
+  // B1 #460：状态栏悬浮菜单旅程搬 StatusMenus.js（placeOverlay/placeBugMenu 改名 Status 前缀），拼合断言意图不变
+  // 2026-10-17 先修：原来一条 `place(Status)?Overlay` 同时兜住两处，状态栏那侧哪天不再从 rect 取位置，
+  //   也会被技能浮层里的同名函数顶住而假绿（真源 src/client/floating/SkillFloatList.js:17 与
+  //   src/client/statusbar/StatusMenus.js:10 是同构两件）。拆成两条，各守一处。
+  requireText(/const placeStatusOverlay\s*=\s*function[\s\S]{0,300}getBoundingClientRect\(\)/, '状态栏菜单缺锚点 rect 定位')
+  requireText(/const placeOverlay\s*=\s*function[\s\S]{0,300}getBoundingClientRect\(\)/, '技能浮层缺锚点 rect 定位')
+  requireText(/const placeStatusBugMenu\s*=\s*function[\s\S]{0,450}bugMenuPos/, '缺 BUG 锚点位置状态')
+  requireText(/const placeSkillPop\s*=\s*function[\s\S]{0,450}skillPopPos/, '缺技能锚点位置状态')
+  requireText(/addEventListener\(['"]scroll['"][\s\S]{0,900}capture:\s*true/, '缺捕获阶段 scroll 重定位')
+  requireText(/addEventListener\(['"]resize['"][\s\S]{0,900}reposition/, '缺 resize 重定位')
+
+  // portal 后 trigger -> popup 的鼠标桥接必须有延迟关闭/取消关闭机制。
+  requireText(/const schedule(Status)?Close\s*=\s*function[\s\S]{0,180}setTimeout/, '缺 portal 弹层延迟关闭')
+  requireText(/clear(Status)?Close\([\s\S]{0,120}bugCloseRef|clear(Status)?Close\([\s\S]{0,120}skillCloseRef/, '缺 portal 弹层取消关闭')
+
+  // 正常 portal 路径保留横向裁剪；没有 ReactDOM 时转 visible，避免 fallback 菜单被同一 wrapper 裁掉。
+  requireText(/overflow:\s*RDOM\s*\?\s*["']hidden["']\s*:\s*["']visible["']/, 'wrapper 缺 RDOM 条件式裁剪/可用降级')
+
+  if (problems.length) {
+    console.log('  FAIL', file, problems.join('；'))
+    failed = true
+  } else {
+    console.log('  PASS', file, '（body portal ✓ · fixed/global z-index ✓ · rect 重定位 ✓ · scroll/resize ✓ · hover bridge ✓ · wrapper 保护保留 ✓）')
+  }
+}
+
+console.log('issue #22：BUG / 技能浮层 overlay 契约')
+targets.forEach(check)
+
+// 双源指纹一致性已移除（T5 #98：一源两物，src 为真源；由 build 保证双产物同构）
+
+if (failed) process.exit(1)
+console.log('\n全部通过')

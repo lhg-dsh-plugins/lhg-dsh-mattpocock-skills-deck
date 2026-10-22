@@ -1,0 +1,118 @@
+{
+  "_说明": "门禁分阶段顺序与显式排除表（#1125）。三个执行器以后读这一份，不再读 package.json 的长串。阶段内可并发、阶段间按数组顺序固定。",
+  "stages": [
+    {
+      "name": "build",
+      "说明": "先确认能构建：构建产物与拼接检查。这一段红了，后面不用再跑。",
+      "match": [
+        "verify-1207",
+        "verify-663-banner",
+        "verify-build",
+        "verify-splice",
+        "verify-transpile",
+        "verify-leaves"
+      ]
+    },
+    {
+      "name": "contract",
+      "说明": "契约与规则：门禁的门禁（归属表新鲜度、依赖规则、调用面）与钉值门禁（分页额度）。",
+      "match": [
+        "verify-gate-map",
+        "verify-pagination",
+        "verify-dependency",
+        "verify-contract",
+        "verify-deck-",
+        "verify-no-",
+        "verify-select",
+        "verify-chain"
+      ]
+    },
+    {
+      "name": "behavior",
+      "说明": "行为：其余全部。默认段，不在 build、contract 与下面 freshness 里的都到这里。",
+      "match": []
+    },
+    {
+      "name": "freshness",
+      "说明": "新鲜度：产物与文档是否跟上源码。放最后，因为它读的是前面各段的产出。",
+      "match": [
+        "freshness",
+        "verify-readme-sync",
+        "verify-star-history",
+        "verify-thanks",
+        "verify-locale-completeness",
+        "verify-locale-config"
+      ]
+    }
+  ],
+  "_排除规则": "下面每条必须带理由与票号；没有写进来的磁盘文件由看守门禁报红，不许静默漏掉。",
+  "exclude": [
+    {
+      "file": "tests/verify-1136-room-cross-sample.ts",
+      "reason": "样本门禁，会往工作树写探针文件，并发跑会让掃源码的门禁假红",
+      "ticket": "#1136"
+    },
+    {
+      "file": "tests/verify-1152-tracker-same-layer-sample.ts",
+      "reason": "样本门禁，同上",
+      "ticket": "#1152"
+    },
+    {
+      "file": "tests/verify-1159-deck-kernel-sample.ts",
+      "reason": "样本门禁，同上",
+      "ticket": "#1159"
+    },
+    {
+      "file": "tests/verify-1161-rooms-assembly-samples.ts",
+      "reason": "样本门禁，同上",
+      "ticket": "#1161"
+    },
+    {
+      "file": "tests/verify-964-same-key-ride.ts",
+      "reason": "已转 TypeScript，保持原状：仍不自动进链（要不要上链是 #964 自己的决定，不由改名顺手带进去）",
+      "ticket": "#964"
+    },
+    {
+      "file": "tests/verify-965-admission.ts",
+      "reason": "已转 TypeScript，保持原状：仍不自动进链（要不要上链是 #965 自己的决定，不由改名顺手带进去）",
+      "ticket": "#965"
+    },
+    {
+      "file": "tests/verify-967-measure.ts",
+      "reason": "已转 TypeScript，保持原状：仍不自动进链（要不要上链是 #967 自己的决定，不由改名顺手带进去）",
+      "ticket": "#967"
+    },
+    {
+      "file": "tests/verify-issue22-ui.ts",
+      "reason": "只动手点：要真机 DSH 图形界面加 Chrome（127.0.0.1:59519），链上跑不了，留给人动手验收",
+      "ticket": "#1125"
+    },
+    {
+      "file": "tests/verify-skill-probe-redcard-and-waiting.ts",
+      "reason": "隔离待查：14/55 行为失败（坏名片分拣语义），先修代码再进链",
+      "ticket": "#1227"
+    },
+    {
+      "file": "tests/verify-time-config.ts",
+      "reason": "隔离待查：3 处覆盖告警（wiring.ts 新常量未登记），登记或豁免后再进链",
+      "ticket": "#1215"
+    },
+    {
+      "file": "tests/verify-504-github-pr.ts",
+      "reason": "隔离待查：雾证据与坏节点行为失败，先定是回归还是门禁过期再进链",
+      "ticket": "#1227"
+    },
+    {
+      "file": "tests/verify-507-pr-offline.ts",
+      "reason": "隔离待查：9过2败，先定性再进链",
+      "ticket": "#1227"
+    },
+    {
+      "file": "tests/verify-chain-renderer.ts",
+      "reason": "待修门禁：4 处旧锚（必填硬字、模板搬家、谓词改名），重锚后进链",
+      "ticket": "#1125"
+    }
+  ],
+  "_已删除": "2026-10-16 删掉 2 扇复刻自测（把源码逻辑抄进门禁里再断言，源码坏了照样绿， maintainer 同意去无价值门禁）：tests/verify-blocked-filter.js、tests/verify-t2b-templates.js。两处棘轮基线已同步（unmigrated 重录 318，handwritten 删行）。 2026-10-20（#1293）删掉 tests/verify-prompt-newlines.ts：它守的「提示词正文不许出现字面 \\n」判据折进 tests/verify-prompts.ts 的第 4c 节，扫描面一处不少（config/prompts/ 下五份 YAML、client.js 与 package/lib/client.js 两份产物、src/host 下的 *_PROMPT、src/tracker/rooms 下的 zh/en 字面量），空豁免清单与指纹断言也一并接过去。删掉的文件不能写进上面的 exclude 表——看守门禁会按「名单里有、磁盘上没有」判烂条，所以记在这里。",
+  "_进链统计": "49 扇待分类：30 扇直接进链（挂正确跑法全绿且守活代码，含 857 在内 9 扇编号回归），10 扇修门禁后进链，5 扇隔离待查（代码或定性未决，见 #1227），2 扇只动手点，2 扇已删除。（#1293 又从链上删掉 1 扇：tests/verify-prompt-newlines.ts，判据并入 tests/verify-prompts.ts；这一行是 #1125 当时的口径，不再逐票维护。）"
+}

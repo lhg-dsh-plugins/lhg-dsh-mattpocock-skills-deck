@@ -1,0 +1,509 @@
+#!/usr/bin/env node
+// verify-chain-capsule.ts —— 门禁：状态栏胶囊里「这个会话在办哪张票」那一段
+// 用法：在插件根目录执行 node --import ./scripts/ts-hook.mts tests/verify-chain-capsule.ts，可独立运行。
+//
+// #1271 起这一段只读一个来源：面板快照的 workRouteTable 字段（宿主 refresh/workRouteReadoutForHost.ts
+// 的产物，与工具回执 data.workRoute 同一份读数）；旧链的 workRoute 字段、碎片号、读数模块与旧叶子已退役。
+// 门禁按组量：
+//   A 判据（纯函数，不开浏览器）：没快照/没挂字段 → 空（整段不画）；表里没记录/当前会话没记录 → 空；
+//     读坏了 → 原因透出（小图标）；对上格了 → 挑当前会话最新一条，标题按快照补，剩几条数出来。
+//   B 版面纪律：真渲染出来的版面上没有内部行话与会话原文；空态不占位、坏态不独占一行。
+//   C 折叠让位表没被动过（还是 12 段）与环境段那条词条已经落了。
+//   D 同一份读数：胶囊判据与面板在办表读的是同一格（与 workRouteTableOf 对拍，不另抄一份期望值）。
+//   E 地图那一条：认身份换图标，文字通道仍留号（#780）。
+//   F #1404 表头单行：左右两簇、四段词条、两枚分隔线，外加 420 宽、跨天与陈旧标记。
+// 【2026-10-12 清理】原先 B、C 两组里还有一批读文件文本钉形状的断言，断言对象都是
+//   文件文本，按维护者「清掉读源码文本钉形状的门禁」的要求撤掉，逐条说明留在各组的注释里。
+import { readFileSync, existsSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { compileFn } from './lib/eval-probe.js'
+import { sourcePath, spliceableJs } from './lib/source-text.ts'
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+// 门禁要从生成物里拿导出（例如界面词表 L_PAGES）时用它：按仓库相对路径动态导入，与别的门禁同一写法。
+const imp = (rel: string) => import(pathToFileURL(resolve(ROOT, rel)).href)
+let passed = 0, failed = 0
+function ok(msg) { passed++; console.log('  PASS ' + msg) }
+function bad(msg) { failed++; console.log('  FAIL ' + msg) }
+function check(cond, msg) { if (cond) ok(msg); else bad(msg) }
+const read = (rel) => {
+  let real = rel
+  try { const p = sourcePath(rel); if (p !== rel) real = p } catch (e) { real = rel }
+  return readFileSync(resolve(ROOT, real), 'utf8')
+}
+
+const LEAF = 'src/client/statusbar/SessionChainCapsule.js'
+// src/client 下的同名 .js 是构建产物（这一阶段要删），真源住在同名 .ts 里：先问取源入口它今天在哪一份。
+//   两种扩展名都不存在时 sourcePath 会抛错，这里接住并照原来的样子报「缺文件」退出，不让异常栈代替提示。
+let leafPath = ''
+try { leafPath = resolve(ROOT, sourcePath(LEAF)) } catch (e) { leafPath = '' }
+if (!leafPath || !existsSync(leafPath)) { console.log('缺文件 ' + LEAF); process.exit(1) }
+
+// 在办表的真叶子（动作词条键、时钟与取数）：胶囊拼闭包时 ambient 的那三个名字就指它。
+const tableLeaf = (function () {
+  const src = spliceableJs('src/client/views/shared/workRouteTable.js').replace(/^[ \t]*export[ \t]+/gm, '')
+  return compileFn(['React', 'DswsCtx', 'Tip', 'tr', 'h'],
+    src + '\nreturn { WORK_ROUTE_TABLE_FIELD, workRouteActionKeyOf, workRouteTableClock, workRouteTableOf }')(
+    { createElement: function () { return null }, useContext: function () { return null } },
+    null, function () { return null }, function (k) { return String(k) }, function () { return null })
+})()
+
+// 与构建同一套做法：剥行首 export，丢进调用方给的作用域里跑。只动判据时给取数口即可；
+// 渲染组件时把十六个名字给全（与构建拼闭包时带进来的同一套）。
+function loadCap(deps) {
+  const src = spliceableJs(LEAF).replace(/^[ \t]*export[ \t]+/gm, '')
+  const factory = compileFn(
+    ['React', 'DswsCtx', 'Tip', 'Ic', 'tr', 'pushNav', 'findMapByIdentity', 'openPanel', 'PortalOverlay', 'placeStatusOverlay', 'clearStatusClose', 'scheduleStatusClose', 'workRouteActionKeyOf', 'workRouteTableClock', 'workRouteTableOf', 'emit'],
+    src + '\nreturn { sessionChainCapsuleOf, SessionChainCapsule }')
+  const h = function (t, p) { return { t: t, p: p, c: Array.prototype.slice.call(arguments, 2) } }
+  const React = deps.React || {
+    createElement: h,
+    useContext: function () { return { h: h } },
+    useRef: function (v) { return { current: v } },
+    useState: function () { return [null, function () {}] },
+  }
+  return factory(React,
+    deps.DswsCtx !== undefined ? deps.DswsCtx : null,
+    deps.Tip || function () { return null },
+    deps.Ic || function () { return null },
+    deps.tr || function (k) { return String(k) },
+    deps.pushNav || function () {},
+    deps.findMapByIdentity || function () { return null },
+    deps.openPanel || function () {},
+    deps.PortalOverlay || function (o, kids) { return { overlay: true, props: o, children: kids } },
+    deps.placeStatusOverlay || function () { return { left: 1, bottom: 2 } },
+    deps.clearStatusClose || function () {},
+    deps.scheduleStatusClose || function (r, fn) { fn() },
+    deps.workRouteActionKeyOf || tableLeaf.workRouteActionKeyOf,
+    deps.workRouteTableClock || tableLeaf.workRouteTableClock,
+    deps.workRouteTableOf || tableLeaf.workRouteTableOf,
+    deps.emit || function () {})
+}
+
+// 拼一份在办表的新形状：读数只带票号/动作/时刻/会话归属，标题由胶囊按快照补。
+function tableFor(entries) {
+  return { ok: true, readout: { at: new Date().toISOString(), staleCount: 0, entries: entries } }
+}
+// 一条在办记录的新形状（currentSession 由宿主挂表时标好，胶囊只收标着的那几行）。
+function entryOf(key, extra) {
+  return Object.assign({ ticketKey: String(key), title: '', sessionLabel: 'sess-mine-aaa', action: 'edit', actionAt: new Date(Date.now() - 3600000).toISOString(), active: true, currentSession: true }, extra)
+}
+
+console.log('A) 判据：跟谁走、空态、坏态')
+{
+  const cap = loadCap({})
+  const judge = cap.sessionChainCapsuleOf
+  check(judge(null, 's1').state === 'idle', '没快照 → idle（调用方整段不画）')
+  check(judge({ snapshot: {} }, 's1').state === 'idle', '字段没挂上 → idle（与没快照同一条：整段不画，不把「还没有」说成坏了）')
+  check(judge({ snapshot: { workRouteTable: tableFor([]) } }, 's1').state === 'empty', '表里没记录 → empty（不把「还没有」说成坏了）')
+  const other = judge({ snapshot: { workRouteTable: tableFor([entryOf('800', { title: '别人的票', sessionLabel: 'sess-other', currentSession: false })]) } }, 's1')
+  check(other.state === 'empty', '当前会话没记录 → empty（不把别的会话的票算到当前头上）')
+  // #1271：新存储读不到文件时直接给空表（ok:true + 空 entries），不再有 absent 这一档；
+  //   上面「表里没记录 → empty」那一条守的就是这条路。
+  const mine = judge({ snapshot: {
+    issues: [{ key: '951', number: 951, title: '演示票', state: 'open', type: 'issue' }],
+    workRouteTable: tableFor([
+      entryOf('951', { title: '', actionAt: new Date(200).toISOString() }),
+      entryOf('950', { title: '', actionAt: new Date(100).toISOString() }),
+    ]),
+  } }, 's1')
+  check(mine.state === 'ok' && mine.entry && mine.entry.ticketKey === '951' && mine.list.length === 2 && mine.list[1].ticketKey === '950', '对上格 → 最新一条是 951，单子共 2 条')
+  check(mine.entry && mine.entry.ticketTitle === '演示票', '标题按快照补（读数没带标题）')
+  const broken = judge({ snapshot: { workRouteTable: { ok: false, reason: 'host.work-route.read-failed' } } }, 's1')
+  check(broken.state === 'unreadable' && broken.reason === 'host.work-route.read-failed', '真坏了 → 原因透出（调用方画小图标，不独占一行）')
+}
+console.log('B) 版面纪律：真渲染出来的版面上没有内部行话与会话原文')
+{
+  // 【已删除】原先 B 组开头是六条读源码文本的断言，断言对象都是源码文本的写法，
+  //   按维护者「清掉读源码文本钉形状的门禁」的要求整组撤掉。下面留的是真渲染出来的版面读数。
+  // 真渲染两条：版面只有号；单子打开时是当前会话的单子（行上挂着跳转）
+  const leafR = (function () {
+    const h = function (t, p) { return { t: t, p: p, c: Array.prototype.slice.call(arguments, 2) } }
+    const box = { init: false, active: null }
+    const React = {
+      createElement: h,
+      useContext: function () { return { h: h } },
+      useRef: function (v) { return { current: v } },
+      useState: function (v) { if (!box.init) { box.init = true; box.active = v } return [box.active, function (nv) { box.active = nv }] },
+    }
+    return loadCap({ React: React })
+  })()
+  const st = { snapshot: {
+    issues: [{ key: '951', number: 951, title: '很长很长的标题很长很长的标题', state: 'open', type: 'issue' }],
+    workRouteTable: tableFor([
+      entryOf('951', { title: '', actionAt: new Date(Date.now() - 3600000).toISOString() }),
+      entryOf('950', { title: '', actionAt: new Date(Date.now() - 7200000).toISOString() }),
+    ]),
+  } }
+  const shut = leafR.SessionChainCapsule({ st: st, sid: 's1' })
+  const flat = []
+  ;(function walk(n) {
+    if (n === null || n === undefined) return
+    if (typeof n === 'string') { flat.push(n); return }
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (typeof n === 'object') { (n.c || []).forEach(walk) }
+  })(shut)
+  // 版面那个号：普通票写成 #号，地图写成裸号（# 换成了地图图标，见 E 节）。
+  const faces = flat.filter(function (s) { return /^#?\d{1,10}$/.test(s) })
+  check(faces.length === 1 && faces[0] === '#951', '单子没打开时版面只有一个号（标题再长也不上版面）')
+  check(flat.some(function (s) { return s.indexOf('dsws-chainmenu') >= 0 }) === false, '单子没打开时版面上没有单子节点')
+  st.chainMenuOpen = true
+  st.chainMenuPos = { left: 1, bottom: 2 }
+  const open = leafR.SessionChainCapsule({ st: st, sid: 's1' })
+  const flat2 = []
+  ;(function walk2(n) {
+    if (n === null || n === undefined) return
+    if (typeof n === 'string') { flat2.push(n); return }
+    if (typeof n === 'object' && n.overlay === true) { flat2.push('[menu]'); (n.children || []).forEach(walk2); return }
+    if (Array.isArray(n)) { n.forEach(walk2); return }
+    if (typeof n === 'object') { (n.c || []).forEach(walk2) }
+  })(open)
+  check(flat2.indexOf('[menu]') >= 0, '悬停打开的是同一套悬浮单子（与 BUG / 可接菜单同形）')
+  check(flat2.some(function (s) { return s.indexOf('#951') >= 0 }) && flat2.some(function (s) { return s.indexOf('#950') >= 0 }), '单子里是当前会话的记录（两张都在，带标题）')
+  check(flat2.some(function (s) { return s.indexOf('sess-mine-aaa') >= 0 }) === false, '单子里没有会话原文（只计数、不泄标识）')
+  const findRows = function (root) {
+    const out = []
+    ;(function walk(n) {
+      if (n === null || n === undefined) return
+      if (Array.isArray(n)) { n.forEach(walk); return }
+      if (typeof n === 'object' && !n.overlay) {
+        if (n.p && typeof n.p.className === 'string' && n.p.className.indexOf('dsws-chainmenu-row') >= 0) out.push(n)
+        ;(n.c || []).forEach(walk)
+      } else if (typeof n === 'object') { (n.children || []).forEach(walk) }
+    })(root)
+    return out
+  }
+  const rows0 = findRows(open)
+  check(rows0.length === 2 && rows0.every(function (r) { return r.p.style.background === 'transparent' }), '没悬停时两行都无底色')
+  rows0[1].p.onMouseEnter()
+  const hovered = leafR.SessionChainCapsule({ st: st, sid: 's1' })
+  const rows1 = findRows(hovered)
+  check(rows1[1].p.style.background === 'rgba(88,166,255,.12)' && rows1[0].p.style.background === 'transparent', '悬停哪行亮哪行（只有第二行高亮）')
+  rows0[1].p.onMouseLeave()
+  const left = leafR.SessionChainCapsule({ st: st, sid: 's1' })
+  check(findRows(left).every(function (r) { return r.p.style.background === 'transparent' }), '鼠标离开后高亮收回')
+  const firstAria = String(rows1[0].p['aria-label'] || '')
+  const lastAria = String(rows1[rows1.length - 1].p['aria-label'] || '')
+  check(firstAria.indexOf('#950') === 0 && lastAria.indexOf('#951') === 0, '旧在上新在下（首行 #950，末行 #951）')
+  check(rows1[rows1.length - 1].p.className.indexOf('is-latest') >= 0 && rows1[0].p.className.indexOf('is-latest') < 0, '最新标识落在沉底那一行')
+  check(rows1.every(function (r) { return String(r.p['aria-label'] || '').indexOf('·') < 0 }), '行内不用 · 分隔')
+  const pillBadges = []
+  ;(function walkPill(n) {
+    if (n === null || n === undefined) return
+    if (Array.isArray(n)) { n.forEach(walkPill); return }
+    if (typeof n === 'object' && !n.overlay) {
+      if (n.p && n.p.style && n.p.style.borderRadius === 99 && typeof n.c !== 'undefined') {
+        const texts = []
+        ;(function inner(m) {
+          if (typeof m === 'string') texts.push(m)
+          else if (Array.isArray(m)) m.forEach(inner)
+          else if (m && typeof m === 'object') (m.c || []).forEach(inner)
+        })(n.c)
+        if (texts.some(function (t) { return /^#?\d{1,10}$/.test(t) })) pillBadges.push(texts.join(''))
+      }
+      ;(n.c || []).forEach(walkPill)
+    } else if (typeof n === 'object') { (n.children || []).forEach(walkPill) }
+  })(hovered)
+  check(pillBadges.length === 2 && pillBadges.some(function (t) { return t === '#950' }) && pillBadges.some(function (t) { return t === '#951' }), '号做成了徽章（两行的号徽章各就各位）')
+}
+console.log('C) 接线：折叠让位表与环境段')
+{
+  // 【已删除】原先 C 组开头是六条读文件文本的断言，断言对象全是文件文本的写法，
+  //   按维护者「清掉读源码文本钉形状的门禁」的要求整组撤掉。下面留的是真函数与词条。
+  const capFoldSrc = spliceableJs('src/client/statusbar/capFold.js').replace(/^[ \t]*export[ \t]+/gm, '')
+  const capFold = compileFn([], capFoldSrc + '\nreturn { CAP_FOLD_POLICY }')()
+  const keys = Object.keys(capFold.CAP_FOLD_POLICY || {}).sort(function (a, b) { return Number(a) - Number(b) })
+  check(JSON.stringify(keys) === JSON.stringify(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']), '让位表是 12 段（环境计数 5 早于时间，在办编号 12 排在最后）')
+  const zh = read('src/client/kernel/locale-pages.js')
+  check(zh.indexOf("'chainView.capsuleDoing'") >= 0, '中英文词条 chainView.capsuleDoing 已落（zh/en 各一）')
+}
+
+console.log('D) 同一份读数：胶囊与面板在办表读同一格')
+{
+  // #1271：两处都只认快照上 WORK_ROUTE_TABLE_FIELD 那一格；在办表改形状，胶囊必须跟着变，
+  //   否则面板与胶囊各说各话。这里拿真叶子对拍，不另抄一份期望值。
+  const st = { snapshot: { workRouteTable: tableFor([entryOf('951'), entryOf('950')]) } }
+  const tview = tableLeaf.workRouteTableOf(st)
+  const cap = loadCap({}).sessionChainCapsuleOf(st, 's1')
+  check(tview.state === 'ok' && tview.rows.length === 2, '在办表读出两行')
+  check(cap.state === 'ok' && cap.list.length === tview.rows.length && cap.entry.ticketKey === tview.rows[0].ticketKey, '胶囊挑的那一条就是表里第一行，条数一致')
+  check(tableLeaf.WORK_ROUTE_TABLE_FIELD === 'workRouteTable', '两处认的是同一个字段名')
+}
+console.log('E) 地图那一条：认身份换图标，文字通道仍留号（#780）')
+{
+  // 【已删除】原先这里读 LEAF 的源码文本断言地图图标，断言对象是源码文本的写法，撤掉；
+  //   版面是不是地图图标由下面真渲染的图标与号徽章读数守。
+  // 就近表认身份只看归一过的 type='map'（#780，不读标签；旧叶子同口径，#1271 原样搬运）：
+  //   地图本票不在就近表里（旧叶子只收 issues / 图内票 / 瘦身行），这里地图身份走 issues 里 type='map' 的行。
+  const st = { snapshot: {
+    issues: [
+      { key: '40', number: 40, title: '某地图', state: 'open', type: 'map' },
+      { key: '780', number: 780, title: '普通票', state: 'open', type: 'issue' },
+    ],
+    workRouteTable: tableFor([
+      entryOf('40', { title: '', actionAt: new Date(Date.now() - 3600000).toISOString() }),
+      entryOf('780', { title: '', actionAt: new Date(Date.now() - 7200000).toISOString() }),
+    ]),
+  } }
+  const h = function (t, p) { return { t: t, p: p, c: Array.prototype.slice.call(arguments, 2) } }
+  const icons = []
+  const built = loadCap({
+    React: { createElement: h, useContext: function () { return { h: h } }, useRef: function (v) { return { current: v } }, useState: function () { return [null, function () {}] } },
+    Ic: function (props) { icons.push(props && props.n); return { t: 'Ic', p: props || {}, c: [] } },
+  })
+  const shut = built.SessionChainCapsule({ st: st, sid: 's1' })
+  const flat = []
+  ;(function walk(n) {
+    if (n === null || n === undefined) return
+    if (typeof n === 'string') { flat.push(n); return }
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (typeof n === 'object') { (n.c || []).forEach(walk) }
+  })(shut)
+  check(flat.indexOf('40') >= 0 && flat.indexOf('#40') < 0, '地图那一条版面上是裸号 40（# 已换成地图图标）')
+  check(icons.indexOf('map') >= 0 && icons.indexOf('pin') >= 0, '地图那一条同时有图钉与地图图标')
+  const foldSlots = []
+  ;(function collect(n) {
+    if (n === null || n === undefined) return
+    if (Array.isArray(n)) { n.forEach(collect); return }
+    if (typeof n !== 'object') return
+    if (n.p && n.p['data-fold-priority'] !== undefined) foldSlots.push(n)
+    ;(n.c || []).forEach(collect)
+  })(shut)
+  check(foldSlots.length === 1, '整条胶囊上只有一个挂让位号的元素')
+  check(foldSlots.every(function (s) { return (s.c || []).every(function (x) { return typeof x === 'string' }) }), '挂让位号的元素里没有元素子节点（收字机器写 textContent 时抹不掉图标）')
+  st.chainMenuOpen = true
+  st.chainMenuPos = { left: 1, bottom: 2 }
+  const open = built.SessionChainCapsule({ st: st, sid: 's1' })
+  const rowNodes = []
+  ;(function walkRows(n) {
+    if (n === null || n === undefined) return
+    if (Array.isArray(n)) { n.forEach(walkRows); return }
+    if (typeof n === 'object' && n.overlay) { (n.children || []).forEach(walkRows); return }
+    if (typeof n === 'object') {
+      if (n.p && typeof n.p.className === 'string' && n.p.className.indexOf('dsws-chainmenu-row') >= 0) { rowNodes.push(n); return }
+      ;(n.c || []).forEach(walkRows)
+    }
+  })(open)
+  check(rowNodes.length === 2, '单子里两行都在')
+  const rowOf = function (key) { return rowNodes.filter(function (r) { return String(r.p['aria-label'] || '').indexOf('#' + key) >= 0 })[0] || null }
+  const mapRow = rowOf('40')
+  const plainRow = rowOf('780')
+  check(!!mapRow && !!plainRow, '单子里认得出哪一行是地图、哪一行是普通票')
+  const pillOf = function (row) {
+    let hit = null
+    ;(function find(n) {
+      if (hit || n === null || n === undefined) return
+      if (Array.isArray(n)) { n.forEach(find); return }
+      if (typeof n !== 'object') return
+      if (n.p && n.p.style && n.p.style.borderRadius === 99) { hit = n; return }
+      ;(n.c || []).forEach(find)
+    })(row)
+    return hit
+  }
+  const textsIn = function (n) {
+    const out = []
+    ;(function inner(m) {
+      if (typeof m === 'string') { out.push(m); return }
+      if (Array.isArray(m)) { m.forEach(inner); return }
+      if (m && typeof m === 'object') (m.c || []).forEach(inner)
+    })(n && n.c)
+    return out
+  }
+  const hasIcon = function (n, name) {
+    let hit = false
+    ;(function find(m) {
+      if (hit || m === null || m === undefined) return
+      if (Array.isArray(m)) { m.forEach(find); return }
+      if (typeof m !== 'object') return
+      if (m.p && m.p.n === name) { hit = true; return }
+      ;(m.c || []).forEach(find)
+    })(n)
+    return hit
+  }
+  const mapPill = mapRow ? pillOf(mapRow) : null
+  const plainPill = plainRow ? pillOf(plainRow) : null
+  check(!!mapPill && hasIcon(mapPill, 'map') && textsIn(mapPill).indexOf('40') >= 0, '单子里地图那行的号徽章是「地图图标 + 裸号」')
+  check(!!plainPill && textsIn(plainPill).indexOf('#780') >= 0, '单子里普通票那行的号徽章仍是 #780')
+  check(!!mapRow && String(mapRow.p['aria-label']).indexOf('#40') >= 0 && String(mapRow.p['aria-label']).indexOf('type.map') >= 0, '地图那行的无障碍名里仍是 #40 且带上类型词')
+  check(!!plainRow && String(plainRow.p['aria-label']).indexOf('type.map') < 0, '普通票那行不冒充地图')
+}
+
+console.log('F) #1404 表头单行：左右两簇、四段词条、两枚分隔线与尺寸契约')
+{
+  const nowMs = Date.now()
+  // 「一小时前」在本地时间 0 点到 1 点之间会落到昨天，而推断这次只要求「最近一条是今天」；
+  //   夹具落到昨天时表头时间会改显示「月-日 时:分」，断言就会在凌晨跑门禁时假红。这里把「就近」夹在今天之内。
+  const startOfToday = new Date(nowMs)
+  startOfToday.setHours(0, 0, 0, 0)
+  const freshAt = Math.max(startOfToday.getTime(), nowMs - 60 * 60 * 1000)
+  const staleAt = nowMs - 25 * 60 * 60 * 1000
+  const pad2 = function (n: any) { return (n < 10 ? '0' : '') + String(n) }
+  const freshDay = new Date(freshAt)
+  const freshHHmm = pad2(freshDay.getHours()) + ':' + pad2(freshDay.getMinutes())
+  const h = function (t: any, p: any) { return { t: t, p: p, c: Array.prototype.slice.call(arguments, 2) } }
+  // 期望文案不手抄：从词表生成物的中文段取词，再用与 tr 相同的占位符替换得到期望文本。
+  //   （#1294：词表真源在 config/copy/pages.yaml，运行时代码与这里读的是同一份生成物 locale-data.ts；
+  //     门禁里再抄一遍字面量就等于同一个值有两处定义，改 YAML 会假红。）
+  const pagesUrl = sourcePath('src/client/kernel/locale-pages.js')
+  const pages = (await imp(pagesUrl) as any).L_PAGES
+  const zh = pages.zh
+  const en = pages.en
+  const CAP_HEAD_KEYS = ['chainView.capsuleHeaderTitle', 'chainView.capsuleHeaderOwn', 'chainView.capsuleHeaderOthers', 'chainView.readAtFull']
+  check(CAP_HEAD_KEYS.every(function (k: any) { return zh[k] !== undefined && en[k] !== undefined }), '表头四段词条中英文都有（键对等）')
+  const zhText = function (k: any, params?: any) {
+    let s = (zh[k] !== undefined) ? String(zh[k]) : String(k)
+    if (params) s = s.replace(/\{(\w+)\}/g, function (m: any, name: any) { return (name in params) ? String(params[name]) : m })
+    return s
+  }
+  const trFor = function (calls: any[]) {
+    return function (k: any, params: any) {
+      calls.push({ k: String(k), params: params })
+      return zhText(k, params)
+    }
+  }
+  const textsOf = function (n: any): any[] {
+    const out: any[] = []
+    const walk = function (x: any) {
+      if (x === null || x === undefined) return
+      if (typeof x === 'string' || typeof x === 'number') { out.push(String(x)); return }
+      if (Array.isArray(x)) { for (let i = 0; i < x.length; i++) walk(x[i]); return }
+      if (typeof x === 'object') { const kids = childrenOf(x); for (let i = 0; i < kids.length; i++) walk(kids[i]) }
+    }
+    walk(n)
+    return out
+  }
+  const nodesOf = function (n: any, tag: any): any[] {
+    const out: any[] = []
+    const walk = function (x: any) {
+      if (x === null || x === undefined) return
+      if (Array.isArray(x)) { for (let i = 0; i < x.length; i++) walk(x[i]); return }
+      if (typeof x !== 'object') return
+      if (x.t === tag) out.push(x)
+      const kids = childrenOf(x)
+      for (let i = 0; i < kids.length; i++) walk(kids[i])
+    }
+    walk(n)
+    return out
+  }
+  // 假 h 的 children 是「按参数原样装进 c」，传数组时会多一层嵌套；真 React 会拍平。
+  //   这里按真 React 的语义把数组拍平，只留元素节点（字符串也留，后面对段文字还要用）。
+  const childrenOf = function (n: any): any[] {
+    const out: any[] = []
+    const walk = function (x: any) {
+      if (x === null || x === undefined) return
+      if (Array.isArray(x)) { for (let i = 0; i < x.length; i++) walk(x[i]); return }
+      out.push(x)
+    }
+    const raw = n ? (Array.isArray(n.c) ? n.c : n.children) : null
+    const kids = Array.isArray(raw) ? raw : []
+    for (let i = 0; i < kids.length; i++) walk(kids[i])
+    return out
+  }
+  const findMenu = function (n: any): any {
+    let found: any = null
+    const walk = function (x: any) {
+      if (found || x === null || x === undefined || typeof x !== 'object') return
+      if (Array.isArray(x)) { for (let i = 0; i < x.length; i++) walk(x[i]); return }
+      if (x.overlay === true) { found = x; return }
+      const kids = childrenOf(x)
+      for (let i = 0; i < kids.length; i++) walk(kids[i])
+    }
+    walk(n)
+    return found
+  }
+  const isHeaderNode = function (n: any) {
+    return !!n && typeof n === 'object' && n.p && n.p.style && n.p.style.fontSize === 11 && n.p.style.padding === '2px 8px'
+  }
+  const stringStyle = function (n: any) { return (n && n.p && n.p.style) ? n.p.style : {} }
+
+  // 一、本会话两条（最近一条在今天内），别的会话两个、共三条 → 表头两簇齐全
+  const trCalls: any[] = []
+  const built = loadCap({ tr: trFor(trCalls) })
+  const st = { snapshot: { workRouteTable: tableFor([
+    entryOf('951', { title: 'fresh', actionAt: new Date(freshAt).toISOString() }),
+    entryOf('950', { title: '', actionAt: new Date(staleAt).toISOString() }),
+    entryOf('800', { title: 'other', sessionLabel: 'sess-other', currentSession: false, actionAt: new Date(freshAt).toISOString() }),
+    entryOf('801', { title: 'other2', sessionLabel: 'sess-other', currentSession: false, actionAt: new Date(freshAt).toISOString() }),
+    entryOf('802', { title: 'other3', sessionLabel: 'sess-third', currentSession: false, actionAt: new Date(freshAt).toISOString() }),
+  ]) }, chainMenuOpen: true, chainMenuPos: { left: 1, bottom: 2 } }
+  const open = built.SessionChainCapsule({ st: st, sid: 's1' })
+  const menuNode: any = findMenu(open)
+  check(!!menuNode, 'menu opens')
+  const menuStyle: any = (menuNode && menuNode.props && menuNode.props.style) || {}
+  check(menuStyle.width === 420 && menuStyle.maxWidth === 420 && menuStyle.maxHeight === 380, 'popover width 420 and max height 380')
+  const menuKids: any[] = childrenOf(menuNode)
+  check(!!menuKids[0] && menuKids[0].t === 'div', '表头是弹层里的第一个节点')
+  const headerNodes = menuKids.filter(isHeaderNode)
+  check(headerNodes.length === 1, '表头只有一个节点（不再有上下两行）')
+  const head: any = menuKids[0]
+  const hs: any = stringStyle(head)
+  // 只断言「是不是一行、是不是横向摆」以及单行高的判据；不钉簇内间距、字重、省略号三件套这类内部样式。
+  check(hs.display === 'flex' && hs.alignItems === 'center' && hs.whiteSpace === 'nowrap', '表头是一行不换行的横向 flex 行')
+  check(hs.fontSize === 11 && hs.lineHeight === '18px' && hs.padding === '2px 8px', '字号 11px、行高 18px、上下内边距 2px（单行总高 22px）')
+  check(head.p.tabIndex === undefined && head.p.role === undefined && head.p.onClick === undefined && head.p.onMouseEnter === undefined && head.p.onMouseLeave === undefined, '表头不可聚焦、不可点、没有悬停反馈')
+
+  const clusters: any[] = childrenOf(head).filter(function (n: any) { return !!n && typeof n === 'object' && n.t })
+  check(clusters.length === 2, '表头分成左右两簇')
+  const left: any = clusters[0]
+  const right: any = clusters[1]
+  // 「右簇靠右」只看这一个结构抓手：自动外边距吸收两簇之间的空白，把右簇推到行尾。
+  //   布局结果最终由浏览器算，像素级对齐由 D:\temp\1404-header-proof 的证明页人工核对；规格不新增像素级门禁。
+  check(stringStyle(right).marginLeft === 'auto', '右簇用自动外边距推到行尾（自动外边距吸收两簇之间的空白）')
+
+  const leftTexts = textsOf(left)
+  const leftExpected = zhText('chainView.capsuleHeaderTitle') + zhText('chainView.capsuleHeaderOwn', { n: 2 }) + zhText('chainView.readAtFull', { time: freshHHmm })
+  check(leftTexts.join('') === leftExpected, '左簇依次是标题、本会话条数、更新时间（实得 ' + leftTexts.join('') + '）')
+
+  const hiddenSvg = function (s: any) { const p = (s && s.p) || {}; return p['aria-hidden'] === true || String(p['aria-hidden']) === 'true' }
+  const svgs: any[] = nodesOf(head, 'svg')
+  check(svgs.length === 2 && svgs.every(hiddenSvg), '表头里有两枚分隔线 SVG（都从无障碍树里隐藏）')
+
+  const rightTexts = textsOf(right)
+  check(rightTexts.join('') === zhText('chainView.capsuleHeaderOthers', { x: 2, y: 3 }), '右簇是一整句「另有 … 个会话在办 … 条」（实得 ' + rightTexts.join('') + '）')
+
+  const callOf = function (key: string) { return trCalls.filter(function (c: any) { return c.k === key })[0] }
+  check(!!callOf('chainView.capsuleHeaderTitle'), '短标题词条被调用')
+  // 这两段词条取的是带占位符的原文，数字由切段函数替换后单独成节点（tr 因此不接参数）；
+  //   参数对不对由上面「左簇整行文字」与「右簇整行文字」逐字对拍，不另断言内部切段方式。
+  const ownCall: any = callOf('chainView.capsuleHeaderOwn')
+  check(!!ownCall, '本会话条数词条被调用')
+  const timeCall: any = callOf('chainView.readAtFull')
+  check(!!timeCall && !!timeCall.params && timeCall.params.time === freshHHmm, '更新时间复用「{time} 更新」词条并带上本地时钟')
+  const othersCall: any = callOf('chainView.capsuleHeaderOthers')
+  check(!!othersCall, '「另有 …」词条被调用')
+  check(!trCalls.some(function (c: any) { return c.k === 'chainView.capsuleHeaderLine1' || c.k === 'chainView.capsuleHeaderLine2' }), '两行表头的老词条不再被调用')
+
+  const texts = textsOf(menuNode)
+  const staleWord = zhText('chainView.capsuleStale')
+  const staleWordHit = texts.some(function (s: any) { return s.indexOf(staleWord) >= 0 })
+  check(staleWordHit, 'rows older than 24h carry the stale marker')
+  const datedHit = texts.some(function (s: any) { return /\d{2}-\d{2} \d{2}:\d{2}/.test(s) })
+  check(datedHit, 'cross-day rows carry month-day plus time')
+  const rowNodes = menuKids.filter(function (n: any) { return !!n && typeof n === 'object' && n.p && typeof n.p.className === 'string' && n.p.className.indexOf('dsws-chainmenu-row') >= 0 })
+  check(rowNodes.length === 2, 'only current session rows are listed')
+  const staleAria = rowNodes.some(function (r: any) { return String(r.p['aria-label'] || '').indexOf(staleWord) >= 0 })
+  check(staleAria, 'stale marker also reaches the accessible name')
+
+  // 二、只有本会话一条、没有别的会话 → 右簇与组间那条分隔线都不渲染，表头仍是一行高
+  const soloCalls: any[] = []
+  const soloBuilt = loadCap({ tr: trFor(soloCalls) })
+  const soloSt = { snapshot: { workRouteTable: tableFor([entryOf('951', { title: 'solo', actionAt: new Date(freshAt).toISOString() })]) }, chainMenuOpen: true, chainMenuPos: { left: 1, bottom: 2 } }
+  const soloOpen = soloBuilt.SessionChainCapsule({ st: soloSt, sid: 's1' })
+  const soloMenu: any = findMenu(soloOpen)
+  const soloKids: any[] = childrenOf(soloMenu)
+  const soloHeaders = soloKids.filter(isHeaderNode)
+  check(soloHeaders.length === 1, '没有别的会话时表头仍只有一个节点')
+  const soloHead: any = soloHeaders[0]
+  const soloClusters: any[] = childrenOf(soloHead).filter(function (n: any) { return !!n && typeof n === 'object' && n.t })
+  check(soloClusters.length === 1, '没有其他会话时右簇不渲染')
+  const soloExpected = zhText('chainView.capsuleHeaderTitle') + zhText('chainView.capsuleHeaderOwn', { n: 1 }) + zhText('chainView.readAtFull', { time: freshHHmm })
+  check(textsOf(soloHead).join('') === soloExpected, '只剩左簇三段（实得 ' + textsOf(soloHead).join('') + '）')
+  const soloSvgs: any[] = nodesOf(soloHead, 'svg')
+  check(soloSvgs.length === 1 && soloSvgs.every(hiddenSvg), '没有其他会话时只剩内部那条分隔线')
+  check(!soloCalls.some(function (c: any) { return c.k === 'chainView.capsuleHeaderOthers' }), '没有其他会话时不调用「另有 …」词条')
+  check(stringStyle(soloHead).lineHeight === '18px' && stringStyle(soloHead).padding === '2px 8px', '表头恒为一行高（18 + 2 + 2 = 22px）')
+}
+
+console.log(failed ? '\n存在失败' : '\n全部通过')
+process.exit(failed ? 1 : 0)

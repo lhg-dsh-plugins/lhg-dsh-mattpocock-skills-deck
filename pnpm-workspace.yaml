@@ -1,0 +1,50 @@
+# 装包守卫：Node 版本不满足根 package.json 的 engines.node 时，pnpm 直接拒绝安装。
+# 为什么必须写在这里：pnpm 不认 .npmrc 里的 engine-strict（实测只打一条警告就继续装，
+# 退出码 0），只有本文件的 engineStrict 是硬拦截（退出码 1）。npm 走 .npmrc，两边都要有。
+# 它同时会查整棵依赖树：某个依赖声明的 engines 与当前 Node 不符，也会拒绝安装。
+engineStrict: true
+
+allowBuilds:
+  esbuild: true
+
+packageExtensions:
+  # dependency-cruiser 只认 typescript >=2.0.0 <7.0.0（它要调用编译器接口读源码）。
+  # 根上装的是 7.0.2：Go 重写之后不再导出这种接口，于是它把 .ts 扩展名整个关掉，
+  # 方向检查会看不见所有 .ts 文件。这里给它自己那一份 5.6.3（与 typescript-ast 同版本），
+  # 只挂在它自己的 node_modules 下，不影响根上 tsc 用的 7.0.2。
+  dependency-cruiser@18:
+    dependencies:
+      typescript: ^5.6.3
+
+minimumReleaseAgeExclude:
+  # 刚上线不久的包会被 pnpm 的「新包先观察一段时间」这条闸拦下，这里按版本号放行。
+  # 日志包已搬到独立仓库维护（#892），当前用 0.3.x（更新包 0.17 的对等依赖要求 ^0.3.4），需临时放行直到过观察期，删掉会装不上。
+  # 更新包已搬到独立仓库维护（#878），不再从这里发布；但 0.11.0、0.12.0 与 0.13.0 都是刚发布的版本，仍需临时放行直到过观察期，删掉会装不上。
+  # 注意分行写：门禁按 '包名@版本号' 字面逐行认，pnpm install 自动合并成的 '||' 一行门禁认不出（0.13.0 升级时实测）。
+  - dsh-log@0.3.4
+  - dsh-plugin-update@0.9.0
+  - dsh-plugin-update@0.10.0
+  - dsh-plugin-update@0.11.0
+  - dsh-plugin-update@0.12.0
+  - dsh-plugin-update@0.13.0
+  - dsh-plugin-update@0.16.0
+  - dsh-plugin-update@0.16.1
+  - dsh-plugin-update@0.16.2
+  - dsh-plugin-update@0.17.0
+  - dsh-plugin-update@0.17.1
+  - dsh-plugin-update@0.18.0
+  - dsh-plugin-update@0.18.1
+  - dsh-plugin-update@0.18.2
+  - dsh-plugin-update@0.18.3
+  - dsh-plugin-update@0.18.4
+  - dsh-plugin-update@0.18.5
+  - dsh-plugin-update@0.18.6
+  - dsh-plugin-update@0.18.7
+  - dsh-plugin-update@0.18.11
+  - dsh-plugin-update@0.18.24
+  - dsh-plugin-update@0.18.25
+  - dsh-plugin-update@0.18.37
+  - dsh-plugin-update@0.18.38
+
+packages:
+  - 'packages/*'

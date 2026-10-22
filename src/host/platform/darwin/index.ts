@@ -1,0 +1,76 @@
+/**
+ * platform/darwin/index.js — macOS 适配器（#165 落地，#164 G 决议定版）。
+ *
+ * 不变量（第一性原理 · 源自 #129 D2 + #164 选 A）：
+ *   D1 getHome 主源 = `os.homedir() || null`，不二次读 process.env.HOME 第二真相（#129 POSIX 直接采用；重复读 env 属契约修订）。
+ *   D2 兜底链全部由 os.homedir 内部承载（HOME → getpwuid(pw_dir)），失败仅剩 try/catch → null；H5 抛异常归一为 null。
+ *   D3 别名仅 sh→sh 恒等；cmd/cmd.exe 在 darwin 不生效（预期 null）；gh 不做别名，PATH 失败仅透传 null。
+ *   D4 gh 的 homebrew/nix DSH_GH_PATH 兜底由 composePlatform 通用层统一承载（2026-08-29 下沉，三端一致），平台层不硬编码 /opt/homebrew/bin。
+ *   D5 路径形态全量委托 node:path.posix（sep='/'），零自实现（沿 #113 D1）；joinHome = path.join(await getHome(), ...segs)。
+ *   D6 反斜杠在 darwin 是合法文件名字符，不作分隔符；deck 永不 home+'\\'+dir。
+ *
+ * 通用包装（缓存 / throw→null / path 委托 / fs 透传 / env 视图）由 `platform/index.ts:composePlatform` 单点提供，
+ * 本文件只提供 OS 专属原语（pathImpl / getHome / resolveExecutable），不重复实现通用层。
+ */
+// 本域 tsconfig 有意不加载任何类型包（types 为空），node:path / node:os 的类型声明随 @types/node
+// 一起被挡在门外；运行时一定是 Node，这两个模块必然存在。所以只忽略导入这一行的类型错误
+// （纯类型层面，不影响 esbuild 的运行时转译）——与 src/tracker/rooms/markdown/path.ts 同一写法。
+// @ts-expect-error
+import nodePath from 'node:path'
+// @ts-expect-error
+import nodeOs from 'node:os'
+
+/** 宿主上下文的最小形状：适配器只从它取 subprocess 原语，外加两个测试注入点（#113/#131）。 */
+type HostCtx = {
+  get(name: 'subprocess'): { resolveExecutable(name: string): string | Promise<string> }
+  _homedir?: () => string
+  __homedir?: () => string
+}
+
+/** 适配器可选项：测试夹具用它注入 homedir 实现；生产走 ctx 与 node:os。 */
+type HostAdapterOpts = { homedir?: () => string }
+
+function resolveHomedir(ctx: HostCtx | undefined, opts: HostAdapterOpts | undefined) {
+  const o: HostAdapterOpts = opts && typeof opts === 'object' ? opts : {}
+  if (typeof o.homedir === 'function') return o.homedir
+  if (ctx && typeof ctx._homedir === 'function') return ctx._homedir
+  if (ctx && typeof ctx.__homedir === 'function') return ctx.__homedir
+  return () => nodeOs.homedir()
+}
+
+export default function darwinAdapter(ctx: HostCtx, opts?: HostAdapterOpts) {
+  const homedir = resolveHomedir(ctx, opts)
+  return {
+    os: 'darwin',
+    /** 路径数学全委托 node:path.posix（零自实现；各 OS 不得重实现）。 */
+    pathImpl: nodePath.posix,
+    /** getHome：os.homedir() 直接采用，空串→null，抛异常→null（单一真相，不二次读 HOME）。 */
+    async getHome() {
+      try {
+        return homedir() || null
+      } catch {
+        return null
+      }
+    },
+    /**
+     * resolveExecutable：按 #164 G 决议 D3/D4
+     * - 别名表仅 sh→sh 恒等，直透 DSH subprocess 解析结果。
+     * - 找不到时 throw → 由通用层 composePlatform 转 null；平台层不叠加 DSH_GH_PATH 兜底。
+     */
+    async resolveExecutable(name: string) {
+      const subprocess = ctx.get('subprocess')
+      return subprocess.resolveExecutable(name)
+    },
+    /**
+     * 本机可见打开配方（#497，OS 底座拥有；macOS 沿用 open，目录与文件同一路，与旧行为一致）。
+     * 反斜杠在 darwin 是合法文件名字符，不作分隔符（D6），此处不碰斜杠。
+     */
+    shellOpen: {
+      opener: 'open',
+      normalize: (t: string) => t,
+      allowOpen: () => true,
+      folderArgs: (t: string) => [t],
+      fileArgs: (t: string) => [t],
+    },
+  }
+}

@@ -1,0 +1,257 @@
+#!/usr/bin/env node
+/**
+ * verify-698-switch-asks-layout.ts — 「切换后端时每次都先问一次域文档布局」门禁（#698）
+ *
+ * 起因（维护者 2026-09-22 真机）：在工作区里点「切换后端」→ 目标选本地 Markdown → 保持「保留」→
+ *   点「确认切换」，弹窗关了，界面上**没有出现**那张问域文档布局的小卡。查下来发现三件事叠在一起：
+ *     1. `store-switch.js` 里「已初始化」那一支提前返回，根本不经过注入决策函数 —— 这条路从来没写过这一问；
+ *     2. 布局答过之后决策函数也不再问（#674 定的「答过就不问」），而 ADR 与验收清单里都写着应该有；
+ *     3. 那张卡当时只渲染在「该工作区尚未初始化」的黄条下面，工作区一旦初始化过就没有地方可画。
+ *   维护者拍板：**切换后端时每次都问一次**，与黄条同一套风格（卡上预选着上次那一项，不想改就点确认）。
+ *
+ * 断三组：
+ *   C 行为层（判据）：真求值那段判据，量「答过也问 / 没答过也问 / 不传 askLayout 时才不问」。
+ *   E 行为层（卡答完之后注什么）：真求值 StatusBackend.js 的 settleSwitchCard ——
+ *     ① 已初始化 + 改了布局 + 确认 → 后端对齐与布局对齐两条都给；
+ *     ② 已初始化 + 没改布局 + 确认 → 只给后端对齐一条；
+ *     ③ 已初始化 + 取消 → 后端对齐照旧给（不给布局对齐）；
+ *     ④ 链里连「初始化过没有」都没有 → 一个字都不注入，只提示看状态栏；
+ *     ⑤ 还没初始化 + 确认 → 交回决策器（不自己拼初始化全文）。
+ *   G 反证：把三处实现各做坏一次，对应的断言必须当场变红。
+ *
+ * 这份文件原先还有四组：A 源码层（卡的位置唯一）、B 判据单源（文本在场扫描）、
+ *   D 切换那条路（两支都先开卡）、F 同屏只许一张卡。A/B/F 已在提交 0f1f576b 删除
+ *   （文本扫描不算有效牙齿，行为那部分由 669 那几道门禁逐条覆盖）；D 这一组同一条理由：
+ *   它量的 7 条行为在 669-C 里逐条都有，故不再重复，也不复活。
+ *
+ * 用法：node tests/verify-698-switch-asks-layout.ts
+ */
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { compileFn } from './lib/eval-probe.js'
+// 取源入口（tests/lib/source-text.ts）：src/client 下的同名 .js 是 pixel-ts 写下的构建产物（这一阶段要删），
+//   真源一律是同名 .ts（状态栏那份 #1209 起就转了，store-switch / prompts-setup 也已转写）。
+//   spliceableJs 按「同名 .ts 优先」解到真源再按全仓唯一口径转译成可求值的 JavaScript（与拼包同一条路，
+//   并剥掉行首 export），下面这些函数体才能原样交给 compileFn 真跑。
+import { spliceableJs } from './lib/source-text.js'
+// 中央时间真值：切换确认的收起延时只住 config/*.yaml，这里读同一份导出来预埋，不在测试里写第二份数字。
+import { STORE_SWITCH_CONFIRM_MS } from '../src/shared/time-config/values.js'
+;(globalThis as any).STORE_SWITCH_CONFIRM_MS = STORE_SWITCH_CONFIRM_MS
+// 中央 import 在 compileFn 函数体里非法，求值前整行剥掉（闭包里它由时间片段提供，门禁里走上面的全局预埋）。
+const stripTimeConfigImport = (s: string): string => s.split('\n').filter((l) => !/^\s*import\s.*time-config\/values\.js/.test(l)).join('\n')
+
+const root = resolve(import.meta.dirname, '..')
+const url = (rel: string): string => pathToFileURL(resolve(root, rel)).href
+let passed = 0
+let failed = 0
+const check = (ok: unknown, msg: string): void => { if (ok) { console.log('  PASS ' + msg); passed++ } else { console.log('  FAIL ' + msg); failed++ } }
+const stripExports = (s: string): string => s.replace(/^[ \t]*export[ \t]+/gm, '')
+
+const sbSrc = spliceableJs('src/client/statusbar/StatusBackend.js')
+const swSrc = spliceableJs('src/client/kernel/store-switch.js')
+const setupSrc = spliceableJs('src/client/kernel/prompts-setup.js')
+
+// ── 公共夹具：真 guide-steps ────────────────────────────────────────────────────────────
+const GUIDE = await import(url('src/shared/tracker/guide-steps.js'))
+// 链快照两个现场：已初始化（tracker:initialized 绿）与还没初始化（它红，仓库那一步绿）
+const CHAIN_INITIALIZED = GUIDE.GUIDE_STEPS.map((s: any) => ({ id: s.checks[0], status: 'done' }))
+const CHAIN_NOT_INIT = GUIDE.GUIDE_STEPS.map((s: any) => ({ id: s.checks[0], status: s.id === 'tracker:initialized' ? 'fail' : 'done' }))
+
+
+console.log('')
+console.log('== C 行为层（判据）：答过也问 / 没答过也问 / 不传 askLayout 时才不问 ==')
+{
+  // 这一段真源会调 readSetupLayout / SETUP_LAYOUT_TEXT_KEYS（都住在 prompts.js，构建时同闭包），
+  //   沙箱里照同一口径顶上它们：读会话里那一项，取值不认识就当没答过。
+  const layoutKeys = { single: 'setup.layout.single', multi: 'setup.layout.multi' }
+  const readLayout = (st: any): string | null => {
+    const t = String((st && st.setupLayout) || '').toLowerCase()
+    return (t === 'single' || t === 'multi') ? t : null
+  }
+  // 手法：compileFn——这段判据本身是从真源里切出来的文本，交给 tests/lib/eval-probe.js 统一造函数；两个参数名按数组传，行为不变。
+  const mod = compileFn(['readSetupLayout', 'SETUP_LAYOUT_TEXT_KEYS'], stripExports(setupSrc) + '\n;return { layoutCardShouldOpen: layoutCardShouldOpen };')(readLayout, layoutKeys)
+  check(mod.layoutCardShouldOpen({ setupLayout: 'multi' }, { askLayout: true }) === true, '布局答过（multi）· 传了 askLayout → 照旧问（#698 维护者拍板的那一条）')
+  check(mod.layoutCardShouldOpen({ setupLayout: 'single' }, { askLayout: true }) === true, '布局答过（single）· 传了 askLayout → 照旧问')
+  check(mod.layoutCardShouldOpen({ setupLayout: null }, { askLayout: true }) === true, '布局没答过 · 传了 askLayout → 问')
+  check(mod.layoutCardShouldOpen({}, { askLayout: true }) === true, '布局与缓存都没有 · 传了 askLayout → 问')
+  check(mod.layoutCardShouldOpen({ setupLayout: 'multi' }, {}) === false, '布局答过 · **不**传 askLayout → 不问（检查页那颗按钮这条口径不动）')
+  check(mod.layoutCardShouldOpen({ setupLayout: null }, {}) === true, '布局没答过 · 不传 askLayout → 仍然问')
+}
+
+console.log('')
+console.log('== E 行为层（卡答完之后注什么）：点确认那一刻重新判一次场景 ==')
+function makeSettle (steps: any, opts?: { blocksSetup?: boolean, debug?: boolean }): any {
+  const o = opts || {}
+  const seen: any = { inject: [], flash: [], prompt: [], log: [], decision: [] }
+  const sandbox: any = {
+    // #1342：StatusBackend 的布局取值名单由构建从共享真源拼进闭包，求值真源文本时按真值顶一份。
+    DOC_LAYOUT_VALUES: ['single', 'multi'],
+    chainSteps: (st: any) => (st && st.chainSnapshot && st.chainSnapshot.steps) || [],
+    guideStepsFor: GUIDE.guideStepsFor,
+    guideStepDone: GUIDE.guideStepDone,
+    firstBackendIdOf: () => 'github',
+    tr: (k: string) => String(k),
+    flash: (st: any, msg: unknown, kind: unknown) => seen.flash.push({ msg: String(msg), kind: kind || '' }),
+    inject: (st: any, text: unknown) => seen.inject.push(String(text)),
+    promptText: (id: string, params: any) => { seen.prompt.push({ id: id, params: params || null }); if (id === 'switchAlign') return 'DIRECT-promptText|' + String((params && params.from) || '') + '->' + String((params && params.to) || ''); return id + '|' + String((params && params.from) || '') + '->' + String((params && params.to) || '') },
+    switchAlignPrompt: (st: any, targetId: unknown, from: unknown, to: unknown, layout: unknown) => { seen.prompt.push({ id: 'switchAlign', targetId: targetId || null, from: from || '', to: to || '', layout: layout || null }); return 'switchAlign|' + String(from || '') + '->' + String(to || '') },
+    injectSetupDecision: (st: any, id: unknown, o2: any) => { seen.decision.push({ id: id, allowCard: !!(o2 && o2.allowCard) }); return o.blocksSetup ? 'blocked' : 'setup' },
+    // 轨迹那一段住在内核（statusbar/ 目录里不许新开日志点），这里顶上真身同形的替身，把记了什么收下来
+    logSwitchSettle: (what: unknown, st: any) => seen.log.push({ level: 'debug', event: 'inject.decision', fields: { prompt: 'switchSettle', kind: String(what || ''), layout: String((st && st.setupLayout) || 'unset') } }),
+    isEnabled: () => o.debug === true,
+    log: (level: unknown, event: unknown, fields: unknown) => seen.log.push({ level: level, event: event, fields: fields || {} }),
+    emit: () => {}, setTimeout, clearTimeout, console: { log () {}, warn () {}, error () {} },
+  }
+  const names = Object.keys(sandbox)
+  const body = stripExports(sbSrc) + '\n;return { settleSwitchCard: settleSwitchCard, worktreeInitializedState: worktreeInitializedState, cancelStatusSetupPick: cancelStatusSetupPick, cardOwnedBySwitch: cardOwnedBySwitch }'
+  // 手法：compileFn——同上，名字数组交给共用入口造函数。
+  const mod = compileFn(names, body)(...names.map((n) => sandbox[n]))
+  const st = { cwd: 'D:\\w', selection: { backendId: 'markdown' }, chainSnapshot: { steps: steps }, setupLayout: 'single', switchCardFrom: 'github', switchCardTo: 'markdown', switchCardLayoutFrom: 'multi', switchAlignDone: false, setupCardOwner: 'switch' }
+  return { mod, st, seen }
+}
+{
+  const changed = makeSettle(CHAIN_INITIALIZED, { debug: true })
+  changed.mod.settleSwitchCard(changed.st, 'confirm')
+  check(changed.seen.inject.length === 2, '已初始化 · 改了布局 · 确认：两条都给（后端对齐 + 布局对齐）—— 实得 ' + JSON.stringify(changed.seen.inject))
+  check(changed.seen.inject[0] === 'switchAlign|github->markdown', '第一条是 switchAlign（记录后端的那几处）—— 实得 ' + JSON.stringify(changed.seen.inject[0]))
+  check(changed.seen.inject[1] === 'switchLayout|setup.layoutMulti->setup.layoutSingle', '第二条是 switchLayout（改之前那一项 → 改之后那一项）—— 实得 ' + JSON.stringify(changed.seen.inject[1]))
+  check(changed.seen.log.some((l: any) => l.fields && l.fields.kind === 'align-layout'), '布局对齐那一条留了一行轨迹（kind=align-layout）')
+  check(changed.seen.log.some((l: any) => l.fields && l.fields.kind === 'align'), '后端对齐那一条也留了一行（kind=align）—— 与「只开了卡」在日志里分得开')
+  const same = makeSettle(CHAIN_INITIALIZED)
+  same.st.setupLayout = 'multi'
+  same.mod.settleSwitchCard(same.st, 'confirm')
+  check(same.seen.inject.length === 1 && same.seen.inject[0] === 'switchAlign|github->markdown', '已初始化 · 没改布局 · 确认：只注入 switchAlign 一条 —— 实得 ' + JSON.stringify(same.seen.inject))
+
+  // 取消那一档（整条链上量）：卡上点过另一个选项 → 点取消 → 答案要退回开卡前那一份，所以只给后端对齐。
+  //   为什么要在整条链上量：卡上那两个单选一点下去经 applyStatusSetupLayout 当场生效（老设计），
+  //   所以「取消」必须把答案退回去 —— 上面那个 makeSettle 只发收尾那一步，量不到这一段，得走真链。
+  const flow = makeStatusFlow(CHAIN_INITIALIZED, { layout: 'multi' })
+  flow.mod.snapshotSetupLayoutForCard(flow.st) // 开卡那一刻（黄条与切换两条路都经过这一个落点）
+  flow.apply('single') // 用户在卡上点了另一个选项
+  flow.mod.cancelStatusSetupPick(flow.st)
+  check(flow.st.setupLayout === 'multi', '卡上点过之后点取消：会话里那份答案退回开卡前那一份（实得 ' + flow.st.setupLayout + '）')
+  check(flow.st.setupLayoutCardOpen === false, '取消之后卡关掉了（界面那一边收干净）')
+  check(flow.seen.inject.indexOf('switchLayout|setup.layoutSingle->setup.layoutMulti') < 0, '取消之后不补布局对齐那条（卡上点过的那一下已经作废）—— 实得 ' + JSON.stringify(flow.seen.inject))
+  check(flow.seen.inject[0] === 'switchAlign|github->markdown', '取消也照旧给后端对齐那一条（不因为多问一句就把本该给的扣下）')
+  // 对照：同一份现场点确认 → 答案留住、两条都给（否则上面那几条可能只是「什么都没发生」）
+  const flow2 = makeStatusFlow(CHAIN_INITIALIZED, { layout: 'multi' })
+  flow2.mod.snapshotSetupLayoutForCard(flow2.st)
+  flow2.apply('single')
+  flow2.mod.confirmStatusSetupPick(flow2.st)
+  check(flow2.st.setupLayout === 'single', '对照：点确认时答案留住了（实得 ' + flow2.st.setupLayout + '）')
+  check(flow2.seen.inject.length === 2, '对照：点确认时两条都给（后端对齐 + 布局对齐）—— 实得 ' + JSON.stringify(flow2.seen.inject))
+
+  const fresh = makeSettle(CHAIN_NOT_INIT)
+  fresh.mod.settleSwitchCard(fresh.st, 'confirm')
+  check(fresh.seen.decision.length === 1 && fresh.seen.decision[0].allowCard === false, '还没初始化 · 确认：把决定交回决策器，且不再开一张卡（allowCard:false）—— 实得 ' + JSON.stringify(fresh.seen.decision))
+  check(fresh.seen.inject.length === 0, '还没初始化 · 确认：这一侧自己不拼初始化全文（由决策器给）')
+
+  const noChain = makeSettle(null)
+  noChain.mod.settleSwitchCard(noChain.st, 'confirm')
+  check(noChain.seen.inject.length === 0 && /bindOkNotReady/.test(noChain.seen.flash.map((f: any) => f.msg).join('|')), '链里连「初始化过没有」都没有：一个字都不注入，提示条指向状态栏 —— 实得 inject=' + noChain.seen.inject.length)
+
+  const once = makeSettle(CHAIN_INITIALIZED)
+  once.st.switchAlignDone = true
+  once.mod.settleSwitchCard(once.st, 'confirm')
+  check(once.seen.inject.indexOf('switchAlign|github->markdown') < 0, '后端对齐已经给过 → 不再重复注入（只补布局对齐那一条）—— 实得 ' + JSON.stringify(once.seen.inject))
+
+  check(makeSettle(CHAIN_INITIALIZED).mod.cardOwnedBySwitch({ setupCardOwner: 'switch' }) === true, '认得出「这张卡归切换那条路收尾」')
+  check(makeSettle(CHAIN_INITIALIZED).mod.cardOwnedBySwitch({}) === false, '黄条 / 检查页开的卡不归切换收尾')
+  const plain = makeSettle(CHAIN_INITIALIZED)
+  plain.st.setupCardOwner = ''
+  plain.mod.cancelStatusSetupPick(plain.st)
+  check(plain.seen.inject.length === 0, '黄条那条路开的卡点取消：一个字都不注入（取消还是取消）')
+  check(plain.st.setupLayoutCardOpen === false, '取消之后卡关掉了（界面那一边收干净）')
+}
+
+// 整条链的夹具：真 StatusBackend（含 snapshot/cancel/confirm/settle）+ 内核那一侧被调到的几样。
+//   给「卡上点过一个选项之后点取消」这类要跨好几个函数才量得准的现场用。
+function makeStatusFlow (steps: any, opts?: { layout?: string }): any {
+  const o = opts || {}
+  const seen: any = { inject: [], flash: [], log: [], decision: [], host: [] }
+  const sandbox: any = {
+    // #1342：StatusBackend 的布局取值名单由构建从共享真源拼进闭包，求值真源文本时按真值顶一份。
+    DOC_LAYOUT_VALUES: ['single', 'multi'],
+    chainSteps: (st: any) => (st && st.chainSnapshot && st.chainSnapshot.steps) || [],
+    guideStepsFor: GUIDE.guideStepsFor,
+    guideStepDone: GUIDE.guideStepDone,
+    firstBackendIdOf: () => 'github',
+    // 注意：labelOf / presentationById 这些**由 StatusBackend.js 自己声明**，不能当参数传进来（会重名报错），
+    //   它自己那一份已经够用（presentationById 为空 → 落到 builtinLabelOf，缺省返回后端 id 字符串）。
+    tr: (k: string) => String(k),
+    flash: (st: any, msg: unknown, kind: unknown) => seen.flash.push({ msg: String(msg), kind: kind || '' }),
+    inject: (st: any, text: unknown) => seen.inject.push(String(text)),
+    promptText: (id: string, params: any) => id + '|' + String((params && params.from) || '') + '->' + String((params && params.to) || ''),
+    switchAlignPrompt: (st: any, targetId: unknown, from: unknown, to: unknown, layout: unknown) => 'switchAlign|' + String(from || '') + '->' + String(to || ''),
+    injectSetupDecision: (st: any, id: unknown, o2: any) => { seen.decision.push({ id: id, allowCard: !!(o2 && o2.allowCard) }); return 'setup' },
+    logSwitchSettle: (what: unknown) => seen.log.push({ kind: String(what || '') }),
+    isEnabled: () => false,
+    log: () => {},
+    emit: () => {},
+    host: { call: (m: unknown, p: unknown) => { seen.host.push({ m: m, p: p }); return Promise.resolve({ ok: true }) } },
+    getCachedSetupLayout: () => null,
+    setCachedSetupLayout: () => {},
+  }
+  const names = Object.keys(sandbox)
+  const body = stripExports(sbSrc) + '\n;return { StatusBackendForTest: { snapshotSetupLayoutForCard: snapshotSetupLayoutForCard, cancelStatusSetupPick: cancelStatusSetupPick, confirmStatusSetupPick: confirmStatusSetupPick, applyStatusSetupLayout: applyStatusSetupLayout, layoutSelectionOf: layoutSelectionOf } };'
+  // 手法：compileFn——同上，名字数组交给共用入口造函数。
+  const mod = compileFn(names, body)(...names.map((n) => sandbox[n])).StatusBackendForTest
+  const st = { cwd: 'D:\\w', selection: { backendId: 'markdown' }, chainSnapshot: { steps: steps }, setupLayout: o.layout || 'single', setupLayoutCardOpen: true, switchCardFrom: 'github', switchCardTo: 'markdown', switchCardLayoutFrom: o.layout || 'single', switchAlignDone: false, setupCardOwner: 'switch' }
+  return { mod, st, seen, apply: (v: unknown) => mod.applyStatusSetupLayout(st, v) }
+}
+
+console.log('')
+console.log('')
+console.log('== G 反证：三处实现各做坏一次，对应的断言必须当场变红 ==')
+{
+  // ① 把「每次都问」改回「答过就不问」—— C 组那条要当场红
+  const brokenJudge = setupSrc.replace('return !!(opts && opts.askLayout === true) || !readSetupLayout(st)', 'return !readSetupLayout(st)')
+  check(brokenJudge !== setupSrc, '反证 ① 的改法能在真源里落地')
+  // 手法：compileFn——反证那一段同样是切出来的文本，走共用入口造函数，改坏的地方保持不变。
+  const modB = compileFn(['readSetupLayout', 'SETUP_LAYOUT_TEXT_KEYS'], stripExports(brokenJudge) + '\n;return { layoutCardShouldOpen: layoutCardShouldOpen };')((st: any) => {
+    const t = String((st && st.setupLayout) || '').toLowerCase()
+    return (t === 'single' || t === 'multi') ? t : null
+  }, { single: 'setup.layout.single', multi: 'setup.layout.multi' })
+  check(modB.layoutCardShouldOpen({ setupLayout: 'multi' }, { askLayout: true }) === false, '反证 ① 成立：改回「答过就不问」之后，答过布局的那一档不再问（正是本票要结束的那个行为）')
+
+  // ② 把「点确认那一刻重判」改掉（照开卡时的旧结论办）—— E 组「还没初始化 + 确认」那条要当场红
+  //   锚点用宽容写法：真源手写 if(state==='fresh'){，转译成可求值文本后是 if (state === "fresh") {（esbuild
+  //   统了空格与引号），两边都咬得住，改转译口径也不用再动这里。
+  const brokenSettle = sbSrc.replace(/if\s*\(\s*state\s*===\s*['"]fresh['"]\s*\)\s*\{/, 'if (false) {')
+  check(brokenSettle !== sbSrc, '反证 ② 的改法能在真源里落地')
+  const seen2: any = { inject: [], flash: [], decision: [] }
+  const sb2: any = {
+    // #1342：同 E 组 —— 布局取值名单来自共享真源，求值真源文本时按真值顶一份。
+    DOC_LAYOUT_VALUES: ['single', 'multi'],
+    chainSteps: (st: any) => st.chainSnapshot.steps, guideStepsFor: GUIDE.guideStepsFor, guideStepDone: GUIDE.guideStepDone,
+    firstBackendIdOf: () => 'github', tr: (k: string) => String(k),
+    flash: () => {}, inject: (st: any, t: unknown) => seen2.inject.push(String(t)),
+    promptText: (id: unknown) => id + '|x->y', switchAlignPrompt: () => 'switchAlign|x->y', injectSetupDecision: (st: any, id: unknown, o: any) => { seen2.decision.push({ allowCard: !!(o && o.allowCard) }); return 'setup' },
+    logSwitchSettle: () => {}, isEnabled: () => false, log: () => {}, emit: () => {}, setTimeout, clearTimeout, console: { log () {}, warn () {}, error () {} },
+  }
+  const names2 = Object.keys(sb2)
+  // 手法：compileFn——同上，名字数组与代码文本分开交给共用入口。
+  const mod2 = compileFn(names2, stripExports(brokenSettle) + '\n;return { settleSwitchCard: settleSwitchCard };')(...names2.map((n) => sb2[n]))
+  const st2 = { selection: { backendId: 'markdown' }, chainSnapshot: { steps: CHAIN_NOT_INIT }, setupLayout: 'single', switchCardFrom: 'github', switchCardTo: 'markdown', switchCardLayoutFrom: 'multi', switchAlignDone: false }
+  mod2.settleSwitchCard(st2, 'confirm')
+  check(seen2.inject.length === 2 && seen2.decision.length === 0, '反证 ② 成立：不重判场景之后，还没初始化那份现场直接去注入对齐那两条（本该交回决策器、一个字都不自己发）—— 实得 inject=' + seen2.inject.length + ' decision=' + seen2.decision.length)
+
+  // ③ 把「卡还开着」那道闸摘掉 —— F 组那条要当场红
+  const brokenGate = swSrc.replace("if (st.setupLayoutCardOpen === true) {", 'if (false) {')
+  check(brokenGate !== swSrc, '反证 ③ 的改法能在真源里落地')
+  // 探针：openSwitchConfirm 真开成时会把 switchConfirm 状态写进 st（并去拉 CRI）。这里不去顶替 loadSwitchCri
+  //   （它与 store-switch.js 自己的声明重名，不能当参数传），改成看会话状态上有没有那一笔。
+  const swSandbox: any = {
+    flash: () => {}, emit: () => {}, host: { call: () => Promise.resolve({ ok: true }) }, tr: () => '',
+  }
+  const names3 = Object.keys(swSandbox)
+  // 手法：compileFn——同上，名字数组与代码文本分开交给共用入口。
+  const mod3 = compileFn(names3, stripExports(stripTimeConfigImport(brokenGate)) + '\n;return { openSwitchConfirm: openSwitchConfirm };')(...names3.map((n) => swSandbox[n]))
+  const st3 = { selection: { backendId: 'github' }, setupLayoutCardOpen: true }
+  const opened = mod3.openSwitchConfirm(st3, 'markdown')
+  check(opened === true && !!st3.switchConfirm && st3.switchConfirm.open === true, '反证 ③ 成立：那道闸摘掉之后，卡还开着也能把「切换后端」那张窗开出来（同屏两张问句）')
+}
+
+console.log('')
+console.log(failed ? 'FAIL ' + passed + ' 项通过 / ' + failed + ' 项未过' : 'PASS 全部 ' + passed + ' 项检查通过')
+process.exit(failed ? 1 : 0)

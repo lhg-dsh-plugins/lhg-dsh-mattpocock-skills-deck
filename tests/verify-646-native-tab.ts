@@ -1,0 +1,308 @@
+#!/usr/bin/env node
+/**
+ * verify-646-native-tab.ts — 验收：面板只有一个落点、一条路，就是 DSH 原生右侧边栏。
+ *
+ * 这份门禁的来历（读的人先看这里，别被文件名误导）：
+ *   #646 当年定的是「两个入口」——本插件自己注册的类型 + 把类型交给 dsh-better-sidebar，两条并存。
+ *   2026-09-21 维护者拍板改成只有一条路：那个插件把面板画进的是同一列，于是原生右栏的引导页里
+ *   出现两枚同名入口（用户看到「两个 MattSkills」）。所以本文件保留文件名、内容整体改写成
+ *   「只有一条路」的断言：凡是一条路不该有的东西，出现即红。
+ *
+ * 现在要守住的东西：
+ *   1) 打开面板只有 openInNativeRight 一条路，没有第二个入口，也没有「这个不行改走另一个」的分派；
+ *   2) 面板类型注册进 DSH 原生登记表（builtin 档），内容体与标题两个槽位按我们自己的类型 id 分格；
+ *   3) 全仓不再有 dsh-better-sidebar 的服务调用（ctx.get('betterSidebar') / registerTab / openTab）；
+ *   4) 设置页不再有「打开位置」那一项，cfg 里也不再留 openIn；
+ *   5) 页内浮窗仍然不注册（shell.overlay 挂载点不给面板用）；
+ *   6) 拿桩上下文真跑一遍 apply：注册了什么、没注册什么、缺服务时崩不崩。
+ *
+ * 覆盖：src 真源五份文件 + 两份构建产物（产物由 scripts/build.mts 从 src 重生成，行首 export 会被剥掉）。
+ * 运行：node --import ./scripts/ts-hook.mts tests/verify-646-native-tab.ts
+ */
+import { readFileSync, existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { JSDOM } from 'jsdom'
+import React from 'react'
+import * as ReactDOMClient from 'react-dom/client'
+// 本文件选 evalInWindow 手法：三段都在已经开了 runScripts 的 jsdom 窗口里跑打包产物，与原 window.eval 等价且更直白。
+import { evalInWindow } from './lib/eval-probe.js'
+// 五份被测真源已经转成 .ts，同名 .js 构建产物已删除；取源统一走 sourceText（问 .js 时优先取同名 .ts 原文）。
+import { sourceText } from './lib/source-text.js'
+
+interface SlotMeta {
+  name: string
+  key?: string
+  inject?: (sessionId: string) => { sessionId: string }
+}
+
+interface SlotRegistration {
+  meta: SlotMeta
+  comp: unknown
+}
+
+interface StubCtx {
+  get: (k: string) => unknown
+  effect: (fn: () => unknown) => () => void
+  inject: (deps: string[], cb: (c: StubCtx) => void) => { dispose: () => void }
+}
+
+interface LoadedModule {
+  factory: (require: (name: string) => unknown) => { apply: (ctx: StubCtx) => void }
+}
+
+let passed = 0, failed = 0
+function check(ok: unknown, msg: string): void { if (ok) { console.log('  PASS ' + msg); passed++ } else { console.log('  FAIL ' + msg); failed++ } }
+
+const ROUTER = 'src/client/kernel/router.js'
+const ASSEMBLY = 'src/client/panelAssembly.ts' // #1254 真源转写：曾叫 panelAssembly.js
+const CONFIG = 'src/client/kernel/config.js'
+const SETTINGS = 'src/client/views/SettingsPage.js'
+const LOCALE_FLOW = 'src/client/kernel/locale-flow.js'
+const FILES = [ROUTER, ASSEMBLY, CONFIG, SETTINGS, LOCALE_FLOW, 'client.js', 'package/lib/client.js']
+const SOURCE_FILES = [ROUTER, ASSEMBLY, CONFIG, SETTINGS, LOCALE_FLOW]
+const ARTIFACTS = ['client.js', 'package/lib/client.js']
+const texts: Record<string, string | null> = {}
+// 五份真源走 sourceText：问 .js 时它优先取同名 .ts 原文，所以这里读到的是源码而不是构建产物；
+// 两种扩展名都不在盘上时它抛错，被下面接住记成 null —— 「读不到」这条判据与以前一样会红，没有被放过。
+for (const rel of SOURCE_FILES) {
+  try { texts[rel] = sourceText(rel) } catch (e) { texts[rel] = null }
+  if (texts[rel] === null) check(false, rel + ' 读不到')
+}
+// 两份构建产物（client.js、package/lib/client.js）仍然是普通文件，直接读盘，别走 sourceText
+// —— 那个入口对 .js 会优先翻出同名 .ts，用它读产物会悄悄改成读源码。
+for (const rel of ARTIFACTS) {
+  const p = resolve(rel)
+  texts[rel] = existsSync(p) ? readFileSync(p, 'utf8') : null
+  if (texts[rel] === null) check(false, rel + ' 读不到（先跑 npm run build）')
+}
+// 规则归谁管：打开路径在 router，注册形状在 panelAssembly；两份产物里两者都有。
+const SET_ROUTER = [ROUTER, 'client.js', 'package/lib/client.js']
+const SET_ASSEMBLY = [ASSEMBLY, 'client.js', 'package/lib/client.js']
+const SET_ALL = [ROUTER, ASSEMBLY, CONFIG, SETTINGS, LOCALE_FLOW, 'client.js', 'package/lib/client.js']
+
+/** 去掉注释后的源码：断言「代码里没有某样东西」时必须用它，否则会被解说说辞误伤。 */
+function stripComments(t: string): string {
+  return String(t).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^A-Za-z0-9_$:])\/\/.*$/gm, '$1')
+}
+
+console.log('== R1 只留一条路：本插件自己注册的类型 ==')
+for (const rel of SET_ROUTER) {
+  const t = texts[rel]
+  if (!t) continue
+  // #1251：esbuild 产物统一双引号，两种形态都认（同 slots:271 做法）。
+  // 这条判据原先写的是 `DECK_NATIVE_TAB_KIND = '...'` 子串比对：产物里类型标注被剥掉，所以对得上；
+  // 换成 .ts 真源后中间隔着 `: string` 类型标注，子串对不上。判据本身不放松（常量名与那个确切取值
+  // 都必须在），只是允许中间出现类型标注 —— 源码与产物两种写法都认。
+  const kindDecl = /DECK_NATIVE_TAB_KIND\s*(?::\s*[^=\n]+)?=\s*['"]dsh-mattpocock-skills-deck:deck-map['"]/
+  check(kindDecl.test(t), rel + ' 面板类型名仍是本插件自己那条')
+  check(t.includes('DECK_NATIVE_TYPE_ID'), rel + ' 类型 id 有自己的常量')
+  const code = stripComments(t)
+  check(!code.includes("ctx.get('betterSidebar')") && !code.includes('ctx.get("betterSidebar")'), rel + ' 代码里不再取 better-sidebar 的服务')
+  check(!/\bensureSidebarTab\b/.test(code), rel + ' 不再有 ensureSidebarTab（那条注册已整段删除）')
+  check(!/\bopenInSidebar\b/.test(code), rel + ' 不再有 openInSidebar（第二个入口已整段删除）')
+  check(!/\bsidebarTabDisposer\b/.test(code) && !/\bsidebarTabRetry\b/.test(code), rel + ' 不再有那条注册的 disposer 与重试定时器')
+  check(!/DECK_TAB_KIND\b/.test(code), rel + ' 不再有交给第三方插件用的那个类型名常量')
+  check(!/registerTab\s*\(/.test(code), rel + ' 不再往第三方插件登记表注册面板类型')
+}
+for (const rel of SET_ASSEMBLY) {
+  const t = texts[rel]
+  if (!t) continue
+  const start = t.indexOf('registerNativeTabType')
+  const block = start >= 0 ? t.slice(start, start + 900) : ''
+  check(/priority:\s*['"]builtin['"]/.test(block), rel + ' 原生登记用 builtin 档')
+  check(/kind:\s*DECK_NATIVE_TAB_KIND/.test(block), rel + ' 原生登记的 kind 取自常量（避免两处漂移）')
+  check(/id:\s*DECK_NATIVE_TYPE_ID/.test(block), rel + ' 原生登记的 id 取自常量')
+  check(/guide:\s*\[\{\s*order:\s*60/.test(block), rel + ' 带一条引导页入口（order 60）')
+  check((t.includes("name: 'sidebar.right.pane.tab'") || t.includes('name: "sidebar.right.pane.tab"')) && (t.includes("name: 'sidebar.right.pane.tab.title'") || t.includes('name: "sidebar.right.pane.tab.title"')), rel + ' 注册了标签内容体与标题栏两个槽位')
+  check(/key:\s*DECK_NATIVE_TYPE_ID/.test(t), rel + ' 两个槽位按我们自己的类型 id 分格（keyed）')
+  check(/inject:\s*function\s*\(sessionId(?::[^)]*)?\)/.test(t), rel + ' 内容体从原生右栏的 inject(sessionId) 拿会话号') // #1254：.ts 真源带类型注解 `(sessionId: any`，产物经转译空格消失
+  check(!stripComments(t).includes("__injectOnce('shell.overlay'") && !stripComments(t).includes('__injectOnce("shell.overlay"'), rel + ' 不注册页内浮窗挂载点（shell.overlay 只留给横幅/弹窗/提示三个席位）')
+}
+
+console.log('')
+console.log('== R2 打开面板只剩一条路，且不再有第二个入口与分派 ==')
+for (const rel of SET_ROUTER) {
+  const t = texts[rel]
+  if (!t) continue
+  const from = t.indexOf('const openPanel')
+  const body = from >= 0 ? t.slice(from, from + 1800) : ''
+  check(body.length > 0 && body.includes('openInNativeRight(st)'), rel + ' openPanel 走原生右侧边栏那条')
+  check(body.length > 0 && !body.includes('openInSidebar'), rel + ' openPanel 里不再有第二个入口')
+  check(!t.includes("cfg.openIn === 'sidebar'") && !t.includes('cfg.openIn === "sidebar"'), rel + ' 不再按配置二选一')
+  check(!/entry-fallback/.test(t), rel + ' 不再有「这个入口不行改走另一个」那条日志')
+  check((t.includes("ctx.get('sidebarRight')") || t.includes('ctx.get("sidebarRight")')) && t.includes('openTabIn') && t.includes('api.openTab('), rel + ' 走原生控制器（含跨会话 openTabIn 与退路 openTab）')
+  check(!t.includes('openPagePanel'), rel + ' 页内浮窗那条路已删（不再有 openPagePanel）')
+  check(!t.includes('openDockPanel'), rel + ' details 列那条老路已删（不再有 openDockPanel）')
+  check(!t.includes('openDetails'), rel + ' 不再调用 layout.openDetails（那个方法在当前 DSH 里不存在）')
+}
+
+console.log('')
+console.log('== R3 设置页与配置：不再有「打开位置」这一项 ==')
+for (const rel of SET_ALL) {
+  const t = texts[rel]
+  if (!t) continue
+  const code = stripComments(t)
+  check(!code.includes('pickOpenIn'), rel + ' 不再有 pickOpenIn')
+  check(!/\bcfg\.openIn\b/.test(code), rel + ' 代码里不再读写字面量 cfg.openIn')
+  check(!code.includes('openIn:'), rel + ' 不再写 openIn 这个配置键')
+}
+for (const rel of [SETTINGS, 'client.js', 'package/lib/client.js']) {
+  const t = texts[rel]
+  if (!t) continue
+  check(!stripComments(t).includes("'settings.save'") && !stripComments(t).includes('"settings.save"'), rel + ' 不再记 settings.save（那一项即时保存随「打开位置」一起没了）')
+}
+for (const rel of [LOCALE_FLOW, 'client.js', 'package/lib/client.js']) {
+  const t = texts[rel]
+  if (!t) continue
+  check(!t.includes("'cfg.openIn'") && !t.includes('"cfg.openIn"') && !t.includes("'cfg.openInDesc'") && !t.includes('"cfg.openInDesc"') && !t.includes("'cfg.openInNative'") && !t.includes('"cfg.openInNative"') && !t.includes("'cfg.openInSidebar'") && !t.includes('"cfg.openInSidebar"'), rel + ' 七个「打开位置」文案键已撤掉')
+}
+
+console.log('')
+console.log('== R4 等待方式：等服务，不等槽位声明 ==')
+for (const rel of SET_ASSEMBLY) {
+  const t = texts[rel]
+  if (!t) continue
+  check(t.includes("ctx.inject(['sidebarRightTabs']") || t.includes('ctx.inject(["sidebarRightTabs"]'), rel + ' 用 ctx.inject 等 sidebarRightTabs 服务')
+  check(/typeof ctx\.inject === ['"]function['"]/.test(t), rel + ' 对没有 ctx.inject 的宿主留了退路（退回每秒重试）')
+}
+
+console.log('')
+console.log('== 运行时断言：拿桩上下文跑一遍 apply，看真的注册了什么 ==')
+{
+  const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', { url: 'http://127.0.0.1:59521/', runScripts: 'dangerously' })
+  const { window } = dom
+  global.window = window
+  global.document = window.document
+  try { global.navigator = window.navigator } catch (e) {}
+  global.Node = window.Node
+  global.HTMLElement = window.HTMLElement
+  global.getComputedStyle = window.getComputedStyle
+  global.requestAnimationFrame = window.requestAnimationFrame || ((cb: (...args: unknown[]) => void) => setTimeout(cb, 0))
+  global.cancelAnimationFrame = window.cancelAnimationFrame || clearTimeout
+  if (typeof window.ResizeObserver === 'undefined') window.ResizeObserver = class { observe(): void {} unobserve(): void {} disconnect(): void {} }
+  global.ResizeObserver = window.ResizeObserver
+  if (!window.document.fonts) window.document.fonts = { ready: Promise.resolve() }
+  global.host = { call: async () => ({ ok: true }) }
+  window.host = global.host
+  window.React = React
+  window.ReactDOM = ReactDOMClient
+  global.React = React
+  global.ReactDOM = ReactDOMClient
+
+  const registrations: SlotRegistration[] = []
+  const slots = {
+    register: (meta: SlotMeta, comp: unknown) => { registrations.push({ meta, comp }); return () => {} },
+    inject: (name: string, fn: () => void) => { try { fn() } catch (e) {} },
+  }
+  const dict: Record<string, string> = {}
+  const trFn = (key: string): string => (dict[key] !== undefined ? dict[key] : key)
+  const services: Record<string, unknown> = {
+    slots,
+    locale: { register: (ns: string, d: { zh?: Record<string, string>; en?: Record<string, string> }) => { Object.assign(dict, d.zh || {}, d.en || {}); return () => {} }, bind: () => trFn },
+    connection: { rpc: { call: async () => ({ ok: true, value: {} }) } },
+    workspaces: { list: async () => [] },
+    sessions: { list: async () => [] },
+    timer: { timeout: (fn: () => void, ms: number) => setTimeout(fn, ms) },
+    // 注意这里**没有** betterSidebar：这一整套桩就是「那个插件不在」的世界，apply 必须照常跑通。
+  }
+  // 桩：原生 tab 类型登记表（只记注册），原生控制器（只记调用）
+  const registeredTypes: Array<{ kind?: unknown; priority?: unknown; id?: unknown; title?: unknown; guide?: Array<{ order?: unknown; title?: unknown; icon?: unknown }> }> = []
+  services.sidebarRightTabs = { register: (def: { kind?: unknown; priority?: unknown; id?: unknown; title?: unknown; guide?: Array<{ order?: unknown; title?: unknown; icon?: unknown }> }) => { registeredTypes.push(def); return () => {} } }
+  const sidebarRightCalls: Array<{ via: string; kind: unknown; options: unknown; sid?: unknown }> = []
+  services.sidebarRight = {
+    openTab: (kind: unknown, options: unknown) => { sidebarRightCalls.push({ via: 'openTab', kind, options }) },
+    openTabIn: (sid: unknown, kind: unknown, options: unknown) => { sidebarRightCalls.push({ via: 'openTabIn', sid, kind, options }) },
+  }
+  let injectSeat: { deps: string[]; cb: (c: StubCtx) => void; dispose: () => void } | null = null
+  const ctx: StubCtx = {
+    get: (k: string) => services[k],
+    effect: (fn: () => unknown) => { const r = fn(); return typeof r === 'function' ? r : () => {} },
+    inject: (deps: string[], cb: (c: StubCtx) => void) => { injectSeat = { deps, cb, dispose: () => {} }; cb(ctx); return injectSeat },
+  }
+
+  let loaded: LoadedModule | null = null
+  window.__ModuleLoader__ = { load(spec: unknown) { loaded = spec as LoadedModule; return spec } }
+  const code = readFileSync(resolve('package/lib/client.js'), 'utf8')
+  // 本处走 evalInWindow：在开了 runScripts 的这张 jsdom 窗口里执行产物。
+  evalInWindow(dom, code)
+  check(!!loaded, '产物加载成功')
+  if (!loaded) { console.log('\ntotal=' + (passed + failed) + ' passed=' + passed + ' failed=' + failed); process.exit(1) }
+
+  const mod = (loaded as LoadedModule).factory((m: string) => {
+    if (m === 'react') return React
+    if (m === 'react-dom') return ReactDOMClient
+    throw new Error('unexpected require: ' + m)
+  })
+  let applyErr: unknown = null
+  try { mod.apply(ctx) } catch (e) { applyErr = e }
+  check(applyErr === null, 'apply 跑通（无异常）' + (applyErr instanceof Error ? '：' + applyErr.message : ''))
+
+  check(injectSeat !== null && injectSeat.deps.includes('sidebarRightTabs'), 'apply 里用 ctx.inject 等了 sidebarRightTabs')
+  check(registeredTypes.length === 1, '只注册了 1 个原生 tab 类型（实际 ' + registeredTypes.length + '）')
+  const def = registeredTypes[0] || {}
+  check(def.kind === 'dsh-mattpocock-skills-deck:deck-map', '类型的 kind 是本插件自己那条（实际 ' + JSON.stringify(def.kind) + '）')
+  check(def.priority === 'builtin', '类型的档位 = builtin（实际 ' + JSON.stringify(def.priority) + '）')
+  check(def.id === 'dsh-mattpocock-skills-deck/deck:map', '类型 id = 包名 + 面板名（实际 ' + JSON.stringify(def.id) + '）')
+  check(typeof def.title === 'function', '类型带标题函数')
+  check(Array.isArray(def.guide) && def.guide.length === 1 && def.guide[0].order === 60, '带一条引导页入口（order 60）—— 引导页里因此只有一枚')
+  check(Array.isArray(def.guide) && typeof def.guide[0].title === 'function' && typeof def.guide[0].icon === 'function', '引导页入口自带标题与图标函数')
+
+  const names = registrations.map((r) => r.meta.name)
+  check(names.includes('sidebar.right.pane.tab'), '注册了标签内容体槽位')
+  check(names.includes('sidebar.right.pane.tab.title'), '注册了标签标题栏槽位')
+  check(!names.includes('shell.overlay'), '没有把面板挂到 shell.overlay（页内浮窗仍是退役状态）')
+  const body = registrations.find((r) => r.meta.name === 'sidebar.right.pane.tab')
+  check(!!body && body.meta.key === 'dsh-mattpocock-skills-deck/deck:map', '内容体按我们自己的类型 id 分格')
+  check(!!body && typeof body.meta.inject === 'function' && (body.meta.inject as (sid: string) => { sessionId: string })('sid-1').sessionId === 'sid-1', '内容体从槽位拿到 sessionId')
+  check(sidebarRightCalls.length === 0, 'apply 阶段不打开面板（打开只由用户操作触发）')
+
+  // 退路：宿主没有 sidebarRightTabs 时不许崩、也不许注册半个（类型注册失败就不注册槽位）
+  const registrations2: SlotMeta[] = []
+  const services2: Record<string, unknown> = Object.assign({}, services, {
+    slots: { register: (meta: SlotMeta) => { registrations2.push(meta); return () => {} }, inject: (n: string, fn: () => void) => { try { fn() } catch (e) {} } },
+    sidebarRightTabs: undefined,
+  })
+  const ctx2: StubCtx = { get: (k: string) => services2[k], effect: (fn: () => unknown) => { const r = fn(); return () => {} }, inject: (deps: string[], cb: (c: StubCtx) => void) => { cb(ctx2); return { dispose: () => {} } } }
+  let loaded2: LoadedModule | null = null
+  const dom2 = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'http://127.0.0.1:59522/', runScripts: 'dangerously' })
+  global.window = dom2.window
+  global.document = dom2.window.document
+  dom2.window.React = React
+  dom2.window.ReactDOM = ReactDOMClient
+  global.React = React
+  global.ReactDOM = ReactDOMClient
+  dom2.window.__ModuleLoader__ = { load(spec: unknown) { loaded2 = spec as LoadedModule; return spec } }
+  dom2.window.host = global.host
+  // 本处走 evalInWindow：第二张 jsdom 窗口同样开了 runScripts。
+  evalInWindow(dom2, code)
+  const mod2 = (loaded2 as LoadedModule).factory((m: string) => (m === 'react' ? React : m === 'react-dom' ? ReactDOMClient : null))
+  let err2: unknown = null
+  try { mod2.apply(ctx2) } catch (e) { err2 = e }
+  check(err2 === null, '没有原生登记表时 apply 不崩')
+  check(registrations2.filter((m) => m.name === 'sidebar.right.pane.tab').length === 0, '没有原生登记表时不注册标签内容体（不留半截注册）')
+
+  // 老宿主：没有 ctx.inject 也不许崩（退回每秒重试那条路）
+  const services3: Record<string, unknown> = Object.assign({}, services)
+  const ctx3: StubCtx = { get: (k: string) => services3[k], effect: (fn: () => unknown) => { const r = fn(); return typeof r === 'function' ? r : () => {} } } as StubCtx
+  let loaded3: LoadedModule | null = null
+  const dom3 = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'http://127.0.0.1:59523/', runScripts: 'dangerously' })
+  global.window = dom3.window
+  global.document = dom3.window.document
+  dom3.window.React = React
+  dom3.window.ReactDOM = ReactDOMClient
+  global.React = React
+  global.ReactDOM = ReactDOMClient
+  dom3.window.__ModuleLoader__ = { load(spec: unknown) { loaded3 = spec as LoadedModule; return spec } }
+  dom3.window.host = global.host
+  // 本处走 evalInWindow：第三张 jsdom 窗口同样开了 runScripts。
+  evalInWindow(dom3, code)
+  const mod3 = (loaded3 as LoadedModule).factory((m: string) => (m === 'react' ? React : m === 'react-dom' ? ReactDOMClient : null))
+  let err3: unknown = null
+  try { mod3.apply(ctx3) } catch (e) { err3 = e }
+  check(err3 === null, '没有 ctx.inject 的老宿主上 apply 不崩（退回每秒重试）')
+}
+
+console.log('')
+console.log('total=' + (passed + failed) + ' passed=' + passed + ' failed=' + failed)
+// apply() 会起常驻的轮询与重试定时器，不清干净进程不会自己退 —— 这里显式收尾。
+process.exit(failed ? 1 : 0)

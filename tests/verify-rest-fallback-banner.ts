@@ -1,0 +1,126 @@
+/*
+ * verify-rest-fallback-banner.ts — 降级横幅「该不该画、画哪一句」的门禁（2026-09-24）
+ * 用法: node tests/verify-rest-fallback-banner.ts
+ *
+ * 这一条盯的是一件具体的事：那条「GraphQL 配额已耗尽，已切换 REST 通道」的横幅，此前只要快照里
+ * 带着 `fallback:'rest'` 就画，而那个标记是**那一次构建**留下的历史事实，会随快照被缓存、被反复取用
+ * —— 于是横幅在某些工作区出现过就常驻（维护者 2026-09-24 反馈）。
+ *
+ * 判据只有一份，在 src/client/views/shared/truthLines.js 的 restFallbackView（纯函数）。
+ * 本门禁分两段：
+ *   一、纯函数行为：不画 / 照旧说「已切换」/ 超过一小时改口成「上次取数走的」/ 时刻缺失也不冒充现在 /
+ *       本次会话关掉就不画、但**新的一次降级要能重新出现**；
+ *   二、词条与产物：两个语言都有那句新话，且构建产物里带着它（产物不重建就是没生效）。
+ *   2026-10-12 修订：原来中间还有一段「界面接线」，那是读 RestFallbackBanner.js 与 ListTab.js 的源码文本
+ *   钉写法（谁调谁、有没有那个属性名），等价重构就会变红，已删；界面上到底画没画由别处的真渲染门禁管。
+ */
+const fs = require('fs')
+const path = require('path')
+// 2026-10-17 先修两处装载口径：
+//   ① eval-probe 与 source-text 在盘上都只有 .ts，写 .js 时靠装载钩子改指；明写 .ts 后挂钩子与
+//      不挂钩子两种跑法都活（先例 tests/verify-rest-fallback-reason.ts）。
+//   ② 词条片段改走共用取源入口读源码，不直读磁盘上那两份 .js：它们已经转成 .ts，旁边的 .js 是
+//      构建产物（字符串被改成双引号），直读会让下面按单引号形状扫词条的断言假红。
+const { compileFn } = require('./lib/eval-probe.ts')
+// 取源走共用入口（tests/lib/source-text.ts）：sourceText 读原文，给按词条形状扫描的断言用；
+// 要拼进函数体当场求值的那一片走 spliceableJs —— 它按构建唯一口径把真源转成可拼接的 JavaScript，
+// 不再直读旁边那份 .js 产物（产物没重建时会停在旧文本上）。
+const { sourceText, spliceableJs } = require('./lib/source-text.ts')
+// 中央时间真值：过期阈值只住 config/*.yaml，这里读同一份导出来预埋，不在测试里写第二份数字。
+const centralTime = require('../src/shared/time-config/values.js')
+globalThis.REST_FALLBACK_STALE_MS = centralTime.REST_FALLBACK_STALE_MS
+const ROOT = path.join(__dirname, '..')
+let failed = false
+const check = function (cond, msg) {
+  if (cond) console.log('PASS ' + msg)
+  else { failed = true; console.log('FAIL ' + msg) }
+  return !!cond
+}
+
+// ── 一、纯函数行为 ──
+// truthLines 的真源就在同名的 .ts 里（旁边 .js 是构建产物）：按构建口径转译后再求值，量到的才是真源码。
+const tsrc = spliceableJs('src/client/views/shared/truthLines.js')
+let mod = null
+try {
+  const body = tsrc.replace(/^[ \t]*export[ \t]+/gm, '').split('\n').filter((l) => !/^\s*import\s.*time-config\/values\.js/.test(l)).join('\n')
+  // 中央 import 在 compileFn 函数体里非法，求值前整行剥掉（闭包里它由时间片段提供，门禁里走上面的全局预埋）。
+  // 本文件选 compileFn：原来就是把五个依赖名当参数、把剥掉 export 的源码当函数体造一个函数，
+  //   被造的代码只看这五个参数（显式注入），用不到外层变量，所以与共用入口一一对应。
+  mod = compileFn(['freshnessLevel', 'PATCH_MERGE_WINDOW_MS', 'lagPromiseFor', 'PROBE_INTERVAL_MS', 'idOfParts'],
+    body + '\n;return { restFallbackView: restFallbackView, REST_FALLBACK_STALE_MS: REST_FALLBACK_STALE_MS };')(
+    function () { return 'fresh' }, 10000, function () { return { maxLagMs: 0 } }, 90000, function () { return 'k' })
+} catch (e) {
+  console.log('FAIL 求值 truthLines.js 拿不到 restFallbackView：' + String(e && e.message))
+}
+if (!mod || typeof mod.restFallbackView !== 'function') {
+  console.log('FAIL 没有 restFallbackView 这个判据函数')
+  process.exit(1)
+}
+const view = mod.restFallbackView
+const MIN = 60 * 1000
+const NOW = 1760000000000
+const st = function (fallback, fallbackAt, reason) {
+  const snap = { fallback: fallback, fallbackAt: fallbackAt }
+  if (reason !== undefined) snap.fallbackReason = reason
+  return { snapshot: snap }
+}
+// #734 起快照多带 fallbackReason（quota / other / 未知）：只有 quota 才说配额句。
+//   下面凡断言配额句的，一律显式给 quota（意图不变）；缺原因的中性档由 verify-rest-fallback-reason.js 钉住。
+
+check(view({ snapshot: null }, NOW, 0) === null, '没有快照 → 一个字都不画')
+check(view(st(null, null), NOW, 0) === null, '快照里没有降级标记 → 不画')
+check(view(st('graphql', NOW), NOW, 0) === null, '标记不是 rest → 不画')
+
+const fresh = view(st('rest', NOW - 5 * MIN, 'quota'), NOW, 0)
+check(!!fresh && fresh.key === 'list.restFallback' && fresh.stale === false, '五分钟前的降级 → 照旧说「已切换 REST 通道」（实测 ' + JSON.stringify(fresh) + '）')
+check(!!fresh && fresh.minutes === 5, '带着分钟数 5（界面要能说「N 分钟前」）')
+
+const stale = view(st('rest', NOW - 2 * 60 * MIN, 'quota'), NOW, 0)
+check(!!stale && stale.key === 'list.restFallbackStale' && stale.stale === true, '两小时前的降级 → 改口成「上次取数走的 REST 通道（N 分钟前）」（实测 ' + JSON.stringify(stale) + '）')
+check(!!stale && stale.minutes === 120, '两小时 → 120 分钟（实测 ' + (stale && stale.minutes) + '）')
+
+const noAt = view(st('rest', null), NOW, 0)
+check(!!noAt && noAt.stale === true && noAt.key === 'list.restFallbackStaleNonQuota', '宿主没给时刻 → 不冒充现在，按「上次」的中性那一句说（原因未知，不提配额；实测 ' + JSON.stringify(noAt) + '）')
+
+check(view(st('rest', NOW - 5 * MIN, 'quota'), NOW, NOW - 5 * MIN) === null, '本次会话关掉这一档 → 不画')
+const again = view(st('rest', NOW - 1 * MIN, 'quota'), NOW, NOW - 5 * MIN)
+check(!!again && again.key === 'list.restFallback', '新的一次降级（时刻更晚）→ 横幅重新出现（关掉的记的是「哪一次」）')
+
+
+// ── 三、词条与产物 ──
+// 2026-09-24：这两条词条随横幅本体一起从 locale-flow.js 搬进 locale-word.js（键名与文案一字未改），
+//   所以这里按**两个族**合起来数「中英各一条」——数法没变，只是不再假定它们住在哪个片段里。
+// #1294：词条真源搬到 config/copy/*.yaml 后，sourceText 给的是生成物里该族的整段文本，段内除了 zh/en
+//   两本字典还有上面的键联合类型（每个键在那里再出现一次）。所以计数按「键 + 冒号」这个字典条目形状数，
+//   不按裸键名数 —— 判据仍是「中英各一条」，只是不把类型声明也算进去。
+const locale = sourceText('src/client/kernel/locale-flow.js') +
+  sourceText('src/client/kernel/locale-word.js')
+const nKey = (locale.match(/'list\.restFallbackStale'\s*:/g) || []).length
+const nDis = (locale.match(/'list\.restFallbackDismiss'\s*:/g) || []).length
+check(nKey === 2, '「上次取数走的 REST…」两种语言各一条（实测 ' + nKey + '）')
+check(nDis === 2, '关闭钮的无障碍名两种语言各一条（实测 ' + nDis + '）')
+// 2026-09-24（维护者截图：横幅左边两个警告三角）：那枚三角由画面画**一次** ——
+//   RestFallbackBanner.js 里那颗 Ic({ n: 'alert' })。词条文本自己再带一枚就成了「图标 + ⚠」叠在一起，
+//   所以这两句词条里不许再出现任何字符版的警告三角（⚠ 与带异体选择符的 ⚠️ 两种写法都算）。
+//   断的是「词条这一侧一条都没有」（画面那一侧画几枚，由组件自己的真渲染门禁管，不在这里读文本）。
+//   两句词条都在上面那份合体文本里，各出现两次（中英各一次），所以逐条读出来看 —— 这条检查
+//   不能用「取第一个匹配」那种写法：那样第二条词条永远读的是第一条，等于漏了一半。
+const triangles = function (s) { return (String(s).match(/[\u26a0\ufe0f]/g) || []).length }
+;['list.restFallback', 'list.restFallbackStale'].forEach(function (k) {
+  const all = Array.from(locale.matchAll(new RegExp("'" + k.replace(/\./g, '\\.') + "':\\s*'([^']*)'", 'g')))
+  const texts = all.map(function (m) { return m[1] })
+  const bad = texts.filter(function (s) { return triangles(s) > 0 })
+  check(texts.length === 2 && bad.length === 0,
+    '词条 ' + k + ' 的中英两条里都没有字符版的警告三角（它由画面画一次；实测读到 ' + texts.length + ' 条：' + JSON.stringify(texts) + '）')
+})
+;['client.js', 'package/lib/client.js'].forEach(function (rel) {
+  const p = path.join(ROOT, rel)
+  if (!fs.existsSync(p)) { check(false, rel + ' 不存在（先跑 node scripts/build.mts）'); return }
+  const built = fs.readFileSync(p, 'utf8')
+  check(built.indexOf('list.restFallbackStale') >= 0, rel + ' 里带着新那句（产物按源码重建过才生效）')
+  check(built.indexOf('data-rest-fallback-dismiss') >= 0, rel + ' 里带着关闭钮')
+  check(/fallbackAt/.test(built), rel + ' 里带着宿主给的降级时刻（fallbackAt）')
+})
+
+console.log(failed ? '\nFAIL — 降级横幅门禁未通过' : '\n全部通过 — 降级横幅「画不画、说哪句」的判据唯一且可测（降级横幅门禁生效）')
+process.exit(failed ? 1 : 0)

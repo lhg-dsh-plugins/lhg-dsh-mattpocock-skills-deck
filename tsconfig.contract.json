@@ -1,0 +1,44 @@
+{
+  // 契约层的 TypeScript 类型检查配置：只检查不产出。
+  // 这一层是纯类型（接口与形状），**没有任何运行时实现**：真源码本来就只有 .ts，
+  // 所以这里不需要 esbuild 转译步骤，也没有派生产物。
+  //
+  // 与四个计算核（src/shared/label-color/ 等）的差别只有一处：本文件要多给一个 DOM 库。
+  // 原因是契约里会出现 AbortSignal（中止信号）与 setTimeout（定时器）这两个类型，
+  // 它们由 DOM 库提供；Node 侧的同名能力与这里声明的是同一形状，不需要再引 @types/node。
+  "compilerOptions": {
+    // 纯 TypeScript（2026-10-20 收尾）：契约目录的旧语言文件已经清零，混编开关摘掉。
+    // 保守目标：宿主（Node）与客户端闭包两边都跑得动，与四个核同一套保证。
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    // 只做类型检查不产出（这一层没有运行时实现可产出）。
+    "noEmit": true,
+    "strict": true,
+    // 不引任何 @types 包：类型只用语言自带的标准写法，不依赖特殊编译选项。
+    "types": [],
+    "skipLibCheck": true
+  },
+  // 只圈契约目录与几份契约相邻的纯模块：别的目录还没转过来，圈进来会当场红一片（那是迁移批次的事）。
+  // 其中两份是 #1026 从契约目录搬出来的行为（名单派生 label-names.ts、修复拼装 fix-contract.ts）：
+  // 它们全标注、严格干净，暂住这份严格配置里，直到迁移批次带来整棵 src/tracker 的归属配置；
+  // 契约门禁的第四项只扫契约目录本身，所以行为文件住在这里不会触发「只许类型与数据」那条（那条不管目录外）。
+  //
+  // #1159 把原先也住在这里的 identity-keys.ts 与 error-rules.ts 收回了 src/tracker 域：它们搬进
+  // `src/tracker/kernel/`，归属由 src/tracker/tsconfig.json 声明（那边 include 是目录通配，不用点名）。
+  // 本文件因此少圈两份，覆盖对账里两边都不重叠。
+  "include": [
+    "src/tracker/contract/**/*.ts",
+    "src/tracker/label-names.ts",
+    "src/tracker/fix-contract.ts",
+    // #1139：界面描述投影（字段表 + projectUiDescription）。与上面两份同一类——带运行时行为，
+    // 所以不住契约目录；它只从契约的 backend-module.ts 取类型，不会把域外源码拉进来。
+    "src/tracker/ui-description.ts",
+    // #1111：markdown 房的失败构造辅助（failFromError / failAs / …）。它只 import 跟踪器层的
+    // kernel/preflight.ts 与 kernel/error-rules.ts，两份都已全标注；同批的 GitHub / GitLab 房后来也转成了 .ts
+    // 并归 src/tracker 配置。这一份仍住这里是因为 src/tracker/tsconfig.json 的 exclude 点名让出它；
+    // 要收口就两边一起改（把它搬回 tracker 域并删掉那条 exclude）。
+    "src/tracker/rooms/markdown/error-fail.ts"
+  ]
+}

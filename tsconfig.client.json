@@ -1,0 +1,46 @@
+{
+  // 887 客户端 TS 真源的类型检查配置：只检查不产出。
+  // 客户端闭包由构建直接读这些 .ts 真源、当场转译再拼成一个闭包，源码树里不再落 .js 产物。
+  // 保守目标 ES2020（与核心三套一致：Node 宿主与浏览器闭包两边都跑得动）；DOM 库给剪贴板与定时器。
+  // include 圈客户端下已经转过来的真源（像素风那几组加两份声明），加上 kernel 目录的整片；
+  // 生成的 .js 同胞不进检查（与 .ts 同名的 .js 编译器一律不认，这是机制不是配置）。
+  "compilerOptions": {
+    // 纯 TypeScript（2026-10-20 收尾）：这棵树的旧语言文件已经清零，原先把旧 .js 放进来检查的
+    // 混编开关（allowJs/checkJs）一并摘掉——留着它只会让以后新冒出来的 .js 悄悄绕过检查。
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "strict": true,
+    "types": [],
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/client/ts-pixel-ambient.d.ts",
+    "src/client/views/pixelProps.d.ts",
+    "src/client/views/*.ts",
+    "src/client/views/diagnosticLog/*.ts",
+    "src/client/views/pixel/*.ts",
+    "src/client/views/skillDetail/*.ts",
+    "src/client/views/cards/cardProps.d.ts",
+    "src/client/views/cards/*.ts",
+    "src/client/views/versionControl/*.ts",
+    // #1253：界面视图层整批转写 —— 这四个子目录原先只有手写 .js，转成 .ts 后要进类型检查，
+    // 同时 scripts/build.mts 的 PX_TS_DIRS 也登记了它们（拼接缝按名单取 .ts 真源，不再转出同名 .js）。
+    "src/client/views/feedback/*.ts",
+    "src/client/views/labels/*.ts",
+    "src/client/views/primitives/*.ts",
+    "src/client/views/shared/*.ts",
+    "src/client/kernel/**/*.ts",
+    "src/client/statusbar/*.ts",
+    "src/client/panel/*.ts",
+    "src/client/floating/*.ts",
+    // #1254：客户端根三份（index/hostShim/panelAssembly）转成 .ts 后进类型检查；此前只圈子目录，根文件不在任何配置里。
+    "src/client/*.ts",
+    // V2 地图详情页整棵树（model/view/wiring 三层）：先不接入生产，但源码要走类型检查。
+    // 它的 .ts 会按叶子登记进客户端闭包（scripts/build.mts 的 LEAF_MODULES），所以放在 views/ 下；
+    // 入口切换（Dock.ts 换成 V2 页面）另开一票，切换之前 src/client/index.ts 里只有标记、没有挂载点。
+    "src/client/views/mapDetailV2/**/*.ts"
+  ]
+}

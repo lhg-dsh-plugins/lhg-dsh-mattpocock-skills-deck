@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>原型 #1290 · 主体文本：贴着原话的感觉，再写四款</title>
+<style>
+:root{--bg:#0c0e12;--card:#10131a;--border:#2a2d35;--txt:#e6edf3;--sec:#a1a1aa;--cap:#8b8b95;
+  --purple:#c084fc;--blue-text:#93c5fd;--amber:#f59e0b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);
+  font:13px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+.page-head{padding:20px 26px 0;max-width:1240px;margin:0 auto}
+.page-head h1{margin:0 0 8px;font-size:18px}
+.page-head p{margin:0;color:var(--sec);font-size:12.5px;max-width:1010px}
+.page-head p+p{margin-top:6px}
+.page-head b{color:var(--txt)}
+.quote{margin:12px 0 0;padding:9px 13px;border-left:2px solid var(--border);background:rgba(255,255,255,.03);
+  color:var(--sec);font-size:12.5px;max-width:1010px}
+.quote b{color:var(--txt)}
+.wrap{padding:18px 26px 60px;max-width:1240px;margin:0 auto}
+section{margin-bottom:32px}
+h2{font-size:15px;margin:0 0 4px;display:flex;align-items:baseline;gap:9px}
+h2 .tag{font-size:11px;color:var(--cap);font-weight:400;border:1px solid var(--border);border-radius:20px;padding:1px 9px}
+.sub{color:var(--cap);font-size:12px;margin:0 0 14px;max-width:1040px}
+.sub b{color:var(--txt)}
+.opt{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px}
+.cards{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.cardcell .cl{font-size:10.5px;color:var(--cap);margin-bottom:5px;text-align:center}
+.notes{flex:1 1 300px;min-width:280px}
+.notes dl{margin:0;font-size:12.3px}
+.notes dt{color:var(--amber);margin-top:7px}
+.notes dd{margin:2px 0 0;color:var(--sec)}
+.notes dd b{color:var(--txt)}
+.hint{color:var(--amber);font-size:12px;max-width:1040px;margin:8px 0 0}
+table{border-collapse:collapse;width:100%;max-width:1040px}
+th,td{border:1px solid var(--border);padding:7px 9px;font-size:12.3px;text-align:left;vertical-align:top}
+th{color:var(--cap);font-weight:400;background:rgba(255,255,255,.03)}
+td.p{color:var(--purple)} td.b{color:var(--blue-text)}
+</style>
+</head>
+<body>
+<div class="page-head">
+  <h1>主体文本：贴着原话的感觉，再写四款</h1>
+  <p>这一轮四款都从你那段原话里长出来：第一人称、跟自己说话、把「说不清」一件件说过去，不上价值、不讲流程、不耍机灵。四款之间只差<b>语气和结构</b>：一 · 原话口气、二 · 压成两句、三 · 先扬后落、四 · 自问一句。</p>
+  <p class="quote">你给的原话（探索地图，目标大而模糊时那种感觉）：<b>「我知道自己要做什么功能，但是仔细想想呢，又感觉很多细节很模糊；会遇到什么困难也不知道，要具体怎么设计也不知道，甚至这个目标要达成什么样的效果也不知道。」</b>　实施地图是同一副骨架反过来填：还是同样的句子，把「不知道」逐个换成「有数」「说得清」。</p>
+  <p>上一轮的「列清单」「碎念」「举例子」这一轮都没留：它们各自往别的方向去了——清单像表格，碎念太碎，举例会出戏，都不是原话那种口气。这四款都留在原话的语气里。</p>
+  <p>这四段都超过 24 个字，右栏 144px 放不下，所以<b>主体文本放在卡片下方通栏</b>（344px 宽、一行 26 字），卡片从 232 高加到 320 高。末尾另附一节：卡片高度动不了时能退成什么样。</p>
+</div>
+
+<div class="wrap">
+  <section>
+    <h2><span class="tag">一</span>原话口气 · 最贴原话的节奏</h2>
+    <p class="sub">保留「但是仔细想想呢」这个转折，保留「会遇到什么困难也不知道、要具体怎么设计也不知道」这种<b>一件件罗列</b>的口气，最后用「连…都说不上来」收住。实施那张是同一副骨架反填。</p>
+    <div class="opt" id="k1"></div>
+  </section>
+
+  <section>
+    <h2><span class="tag">二</span>压成两句 · 去掉口语，更利落</h2>
+    <p class="sub">去掉「但是」「呢」这类口语，把细节、难处、怎么设计串成一句，再用破折号把最重的「做成什么样」单独甩出来。信息一样多，读起来更快。</p>
+    <div class="opt" id="k2"></div>
+  </section>
+
+  <section>
+    <h2><span class="tag">三</span>先扬后落 · 先承认知道，再往下掉</h2>
+    <p class="sub">第一句只说「我知道要做什么功能，这一层是清楚的」，第二句才往下走一层，最后一行落下去。<b>落差是「往下走」这个动作带出来的</b>，不靠形容词。</p>
+    <div class="opt" id="k3"></div>
+  </section>
+
+  <section>
+    <h2><span class="tag">四</span>自问一句 · 最像自言自语</h2>
+    <p class="sub">在中间加一句「真让我说清楚呢」的自问，然后才回答——跟你原话里「仔细想想呢」是<b>同一个转身</b>，只是这次把转身说出声了。</p>
+    <div class="opt" id="k4"></div>
+  </section>
+
+  <section>
+    <h2><span class="tag">退路</span>现卡片放不下时能退成什么样</h2>
+    <p class="sub">如果卡片高度不能动（还是 232 高、右栏 144px、一行 12 字），把款二压成三行是这样：</p>
+    <div class="opt" id="knarrow"></div>
+  </section>
+
+  <section>
+    <h2><span class="tag">对照</span>四款放在一起比</h2>
+    <div id="cmp"></div>
+    <p class="hint">我最想要<b>款一</b>：它跟你那段原话的节奏最像，读完不用反应就能对上自己的状态。第二是<b>款四</b>，多那一句自问，最像人自己在那儿念叨。款二最利落，可利落也意味着不像心里话；款三有递进感，「一层比一层」是四款里唯一带评价的说法，实施那张念着有点勉强。</p>
+  </section>
+
+  <section>
+    <h2><span class="tag">待定</span>挑完之后要做的事</h2>
+    <p class="sub">你挑一款（或指定混搭），我把它并进 <code>docs/prototype/1290-entry-two-maps.html</code> 的真实入口浮层、刷新截图，并同步 #1290 与 #1297 票面上的卡面文案。定稿后还有两处要跟着改：票面上「主体文本只答『点下去会发生什么、走完手里多了什么』、两行内每行 ≤12 汉字」这句要换成新的职责定义和版式（卡片 232 → 320 高、主体文本改通栏）；#1297 的真代码（卡片加高、文案落 <code>config/copy/cards.yaml</code>）等你定稿再动。</p>
+  </section>
+</div>
+
+<script>
+var P="#c084fc", PT="#e9d5ff", B="#93c5fd", BT="#bfdbfe", G="#3fb950";
+function defs(u,c){
+  return '<defs>'+
+    '<radialGradient id="g'+u+'"><stop offset="0" stop-color="'+c+'" stop-opacity=".38"></stop><stop offset="1" stop-color="'+c+'" stop-opacity="0"></stop></radialGradient>'+
+    '<radialGradient id="f'+u+'"><stop offset="0" stop-color="'+c+'" stop-opacity=".3"></stop><stop offset=".55" stop-color="'+c+'" stop-opacity=".14"></stop><stop offset="1" stop-color="'+c+'" stop-opacity="0"></stop></radialGradient></defs>';
+}
+function need(x,y,w,h,stroke,txt,dash){
+  return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(h/2)+'" fill="rgba(0,0,0,0)" stroke="'+stroke+'" stroke-width="1.3"'+(dash?' stroke-dasharray="3.4 2.4"':'')+'></rect>'+
+    '<text x="'+(x+w/2)+'" y="'+(y+h/2+4)+'" text-anchor="middle" font-size="10.5" fill="'+txt+'" letter-spacing=".5">需求</text>';
+}
+function q(x,y,r){
+  return '<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="rgba(10,12,16,.92)" stroke="'+PT+'" stroke-width="1.3"></circle>'+
+    '<text x="'+x+'" y="'+(y+r*.38)+'" text-anchor="middle" font-size="'+(r*1.35)+'" fill="'+PT+'">?</text>';
+}
+function target(x,y,r,color,glow,check){
+  var s='<circle cx="'+x+'" cy="'+y+'" r="'+(r+9)+'" fill="url(#'+glow+')"></circle>';
+  s+='<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="#0b0d11" stroke="'+color+'" stroke-width="1.4"></circle>';
+  if(check){ s+='<path d="M'+(x-r*.42)+' '+y+' l'+(r*.3)+' '+(r*.34)+' l'+(r*.6)+'-'+(r*.68)+'" fill="none" stroke="'+G+'" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>'; }
+  else { s+='<circle cx="'+x+'" cy="'+y+'" r="'+(r*.42)+'" fill="none" stroke="'+color+'" stroke-width="1.1" opacity=".75"></circle>'; }
+  return s;
+}
+function ticket(x,y,w,h){
+  var s='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="4" fill="rgba(29,78,216,.42)" stroke="'+B+'" stroke-width="1.2"></rect>';
+  s+='<path d="M'+(x+6)+' '+(y+h/2)+' l2.2 2.2 4-4.6" fill="none" stroke="'+G+'" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>';
+  s+='<path d="M'+(x+16)+' '+(y+h/2-2.5)+' H '+(x+w-5)+'" stroke="'+B+'" stroke-width="1.2" stroke-linecap="round" opacity=".7"></path>';
+  s+='<path d="M'+(x+16)+' '+(y+h/2+3)+' H '+(x+w-12)+'" stroke="'+B+'" stroke-width="1" stroke-linecap="round" opacity=".35"></path>';
+  return s;
+}
+function artExplore(u){
+  var s=defs(u,"#c084fc");
+  s+=need(6,42,42,20,P,PT,true);
+  s+='<circle cx="52" cy="52" r="5" fill="none" stroke="'+P+'" stroke-opacity=".35" stroke-width="1"></circle>';
+  s+='<circle cx="52" cy="52" r="2.6" fill="'+P+'"></circle>';
+  s+='<path d="M54 52 H 68" fill="none" stroke="'+P+'" stroke-width="1.6" stroke-linecap="round"></path>';
+  s+='<circle cx="72" cy="52" r="3.6" fill="'+P+'"></circle>';
+  s+='<path d="M72 52 C 80 46 88 26 96 21" fill="none" stroke="'+P+'" stroke-width="1.6" stroke-linecap="round" opacity=".9"></path>';
+  s+='<path d="M72 52 C 82 52 90 52 96 52" fill="none" stroke="'+P+'" stroke-width="1.6" stroke-linecap="round" opacity=".9"></path>';
+  s+='<path d="M72 52 C 80 58 88 78 96 83" fill="none" stroke="'+P+'" stroke-width="1.6" stroke-linecap="round" opacity=".9"></path>';
+  s+=q(104,20,8); s+=q(104,52,8); s+=q(104,84,8);
+  s+='<path d="M112 20 C 124 22 134 40 141 50" fill="none" stroke="'+PT+'" stroke-width="1.2" stroke-dasharray="4 4" stroke-linecap="round" opacity=".45"></path>';
+  s+='<path d="M112 52 C 124 52 134 52 141 52" fill="none" stroke="'+PT+'" stroke-width="1.2" stroke-dasharray="4 4" stroke-linecap="round" opacity=".4"></path>';
+  s+='<path d="M112 84 C 124 82 134 64 141 54" fill="none" stroke="'+PT+'" stroke-width="1.2" stroke-dasharray="4 4" stroke-linecap="round" opacity=".35"></path>';
+  s+='<circle cx="152" cy="52" r="30" fill="url(#f'+u+')"></circle>';
+  s+=target(150,52,8,PT,'g'+u,false);
+  return s;
+}
+function artImpl(u){
+  var s=defs(u,"#60a5fa");
+  s+=need(6,42,42,20,B,BT,false);
+  var ys=[8,31,54,77], cy=[16.5,39.5,62.5,85.5];
+  for(var i=0;i<4;i++){ s+='<path d="M48 52 C 56 52 58 '+cy[i]+' 68 '+cy[i]+'" fill="none" stroke="'+B+'" stroke-width="1.4" stroke-linecap="round" opacity=".75"></path>'; }
+  for(var j=0;j<4;j++){
+    s+=ticket(70,ys[j],36,17);
+    s+='<path d="M106 '+cy[j]+' C 118 '+cy[j]+' 128 '+(cy[j]<52?cy[j]+8:cy[j]-8)+' 138 50" fill="none" stroke="'+B+'" stroke-width="1.3" stroke-linecap="round" opacity=".55"></path>';
+  }
+  s+=target(148,52,8,BT,'g'+u,true);
+  return s;
+}
+var MONO='Consolas,Menlo,monospace';
+function node(x,y,w,h,text,o){
+  o=o||{};
+  return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(o.rx==null?5:o.rx)+'" fill="'+(o.fill||"rgba(255,255,255,.04)")+'" stroke="'+(o.stroke||"#8b8b95")+'" stroke-width="1"'+(o.dash?' stroke-dasharray="3 2"':'')+'></rect>'+
+    '<text x="'+(x+w/2)+'" y="'+(y+h/2+2.5)+'" text-anchor="middle" font-size="'+(o.fs||7)+'" fill="'+(o.text||"#e6edf3")+'" font-family="'+MONO+'">'+text+'</text>';
+}
+function arrowH(x1,x2,y,c){
+  return '<path d="M'+x1+' '+y+' H'+(x2-3)+'" stroke="'+c+'" stroke-width="1" fill="none"></path>'+
+    '<path d="M'+(x2-3.4)+' '+(y-2.4)+' L'+x2+' '+y+' L'+(x2-3.4)+' '+(y+2.4)+'" stroke="'+c+'" stroke-width="1" fill="none"></path>';
+}
+function chainExploreH(ox,oy){
+  var s="", cy=oy+31, rows=["/prototype","/research","/grilling","/domain-modeling"], rowH=12, gap=2.5;
+  var top=cy-(rows.length*rowH+(rows.length-1)*gap)/2;
+  s+=node(ox,cy-6,48,12,"/wayfinder",{fill:"rgba(192,132,252,.12)",stroke:P,text:PT,fs:6.8});
+  s+=arrowH(ox+48,ox+56,cy,P);
+  var sx=ox+56,gx=ox+64;
+  s+='<path d="M'+sx+' '+cy+' V'+(top+rowH/2)+'" stroke="'+P+'" stroke-width="1" fill="none"></path>';
+  s+='<path d="M'+sx+' '+cy+' V'+(top+(rows.length-1)*(rowH+gap)+rowH/2)+'" stroke="'+P+'" stroke-width="1" fill="none"></path>';
+  for(var i=0;i<rows.length;i++){
+    var y=top+i*(rowH+gap);
+    s+=arrowH(sx,gx,y+rowH/2,P);
+    s+=node(gx,y,86,rowH,rows[i],{fill:"rgba(192,132,252,.10)",stroke:P,text:PT,fs:6.6,rx:4});
+  }
+  var rx=gx+86+4,mx=rx+4;
+  s+='<path d="M'+rx+' '+(top+rowH/2)+' V'+(top+(rows.length-1)*(rowH+gap)+rowH/2)+'" stroke="'+P+'" stroke-width="1" fill="none"></path>';
+  s+=arrowH(mx,mx+6,cy,P);
+  var gx2=mx+6;
+  s+=node(gx2,cy-6,46,12,"目标明确",{fill:"transparent",stroke:"#5c636d",dash:true,text:"#b4bac2",fs:7.4,rx:4});
+  s+=arrowH(gx2+46,gx2+54,cy,B);
+  s+=node(gx2+54,cy-6,38,12,"/to-spec",{fill:"rgba(29,78,216,.30)",stroke:B,text:BT,fs:6.6,rx:4});
+  s+=arrowH(gx2+92,gx2+100,cy,B);
+  s+=node(gx2+100,cy-6,46,12,"/to-tickets",{fill:"rgba(29,78,216,.30)",stroke:B,text:BT,fs:6.6,rx:4});
+  return s;
+}
+function chainImplH(ox,oy){
+  var s="", cy=oy+31;
+  s+=node(ox,cy-6,68,12,"/grill-with-docs",{fill:"rgba(29,78,216,.30)",stroke:B,text:BT,fs:6.6});
+  s+=arrowH(ox+68,ox+94,cy,B);
+  s+=node(ox+94,cy-6,46,12,"目标明确",{fill:"transparent",stroke:"#5c636d",dash:true,text:"#b4bac2",fs:7.4,rx:4});
+  s+=arrowH(ox+140,ox+158,cy,B);
+  s+=node(ox+158,cy-6,38,12,"/to-spec",{fill:"rgba(29,78,216,.30)",stroke:B,text:BT,fs:6.6,rx:4});
+  s+=arrowH(ox+196,ox+220,cy,B);
+  s+=node(ox+220,cy-6,46,12,"/to-tickets",{fill:"rgba(29,78,216,.30)",stroke:B,text:BT,fs:6.6,rx:4});
+  return s;
+}
+var uid=0;
+function artOf(kind,w,h,x,y){
+  var u='u'+(uid++);
+  var a = kind==='explore' ? artExplore(u) : artImpl(u);
+  return '<svg x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" viewBox="0 0 168 104">'+a+'</svg>';
+}
+var TXT={
+  explore:{name:"探索地图", state:"目标大而模糊", color:P, border:"rgba(188,140,255,.45)"},
+  impl:{name:"实施地图", state:"目标明确清晰", color:B, border:"rgba(29,78,216,.75)"}
+};
+/* 主体文本：每行是一串「文字 + 颜色」的片段，行内用 tspan 排，颜色切换不影响字的接续 */
+function bodyText(x,y,lines,fs,lineH){
+  var s='';
+  for(var j=0;j<lines.length;j++){
+    s+='<text x="'+x+'" y="'+(y+j*lineH)+'" font-size="'+fs+'">'+lines[j].map(function(r){
+      return '<tspan fill="'+r.c+'">'+r.t+'</tspan>';
+    }).join("")+'</text>';
+  }
+  return s;
+}
+/* 主体文本有两种放法：右栏（跟眉标、状态句同列，宽 144px），或通栏（占卡片下方整条，宽 320px） */
+function cardFinal(kind,lines,opt){
+  opt=opt||{};
+  var c=TXT[kind], W=368, s='';
+  var H = opt.wide ? 320 : 232;
+  s+='<svg viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',system-ui,sans-serif">';
+  s+='<rect x="0.5" y="0.5" width="'+(W-1)+'" height="'+(H-1)+'" rx="12" fill="#10131a" stroke="'+c.border+'"></rect>';
+  s+='<rect x="12" y="12" width="184" height="116" rx="8" fill="#0a0c10" stroke="#2a2d35"></rect>';
+  s+=artOf(kind,168,104,20,18);
+  s+='<text x="208" y="36" font-size="11" fill="'+c.color+'" fill-opacity=".72" letter-spacing="1.2">'+c.name+'</text>';
+  s+='<text x="208" y="64" font-size="17" font-weight="700" fill="'+c.color+'">'+c.state+'</text>';
+  if(opt.wide){
+    s+='<rect x="12" y="140" width="344" height="76" rx="8" fill="#0a0c10" stroke="#2a2d35"></rect>';
+    s+=bodyText(24,160,lines,12,17);
+    s+='<rect x="12" y="228" width="344" height="80" rx="8" fill="#0a0c10" stroke="#2a2d35"></rect>';
+    s+= kind==='explore' ? chainExploreH(26,237) : chainImplH(26,237);
+  }else{
+    s+=bodyText(208,86,lines,12,17);
+    s+='<rect x="12" y="140" width="344" height="80" rx="8" fill="#0a0c10" stroke="#2a2d35"></rect>';
+    /* 技能链在面板里垂直居中：面板 140..220，中心 180；链内部的中线是 oy+31，所以 oy 传 149 */
+    s+= kind==='explore' ? chainExploreH(26,149) : chainImplH(26,149);
+  }
+  return s+'</svg>';
+}
+var GRAY="#a1a1aa";
+/* 一行主体文字 = 一个「文字 + 颜色」的片段；L 生成灰色的片段 */
+function L(t){ return {t:t,c:GRAY}; }
+
+/* 这一轮：四款都从原话那种口气里长出来，只换语气和结构 */
+var WAYS=[
+  {id:"k1", name:"原话口气", q:"转折的口语 + 一件件罗列「不知道」", wide:true,
+   e:[[L("我知道自己要做什么功能，但是仔细想想呢，")],[L("很多细节很模糊：会遇到什么困难不知道，")],[L("要具体怎么设计也不知道，连做成什么效果都说不上来。")]],
+   i:[[L("我知道自己要做什么功能，仔细想想呢，也都清楚：")],[L("会遇到什么困难心里有数，要具体怎么设计也有个方向；")],[L("连做成什么效果，都说得出。")]],
+   strong:"跟你那段原话的节奏一模一样，连「但是仔细想想呢」这个转折都在；卡片会被反复看，这一款读几遍都还像自己脑子里那句话。",
+   weak:"四款里最长，三行把通栏铺满；实施那张是照骨架反填，「也都清楚：」后面接排比，念着比探索那张僵。"},
+  {id:"k2", name:"压成两句", q:"去掉口语，破折号收在最重的一项", wide:true,
+   e:[[L("我知道自己要做什么功能，可是仔细想想，")],[L("细节、难处、怎么设计，一样一样都还说不清——")],[L("连做成什么样，也说不上来。")]],
+   i:[[L("我知道自己要做什么功能，仔细想想，")],[L("细节、难处、怎么设计，一样一样都说得清——")],[L("连做成什么样，也说得上来。")]],
+   strong:"更利落：去掉「但是」「呢」这类口语，把细节、难处、怎么设计串成一句，破折号再把最重的「做成什么样」甩出来。",
+   weak:"利落也就没那么像心里话了，有点像谁在替用户总结；「一样一样」这个说法偏书面。"},
+  {id:"k3", name:"先扬后落", q:"先承认知道，再往下掉一层", wide:true,
+   e:[[L("我知道要做什么功能，这一层是清楚的。再往下想：")],[L("细节什么样、难在哪儿、该怎么设计、做成什么效果，")],[L("就一层比一层糊涂。")]],
+   i:[[L("我知道要做什么功能，这一层是清楚的。再往下想：")],[L("细节什么样、难在哪儿、该怎么设计、做成什么效果，")],[L("就一层比一层清楚。")]],
+   strong:"有递进：第一句先承认「我知道」，第二句才往下走，落差是「往下走」这个动作带出来的，不是形容词堆出来的。",
+   weak:"「一层比一层」是四款里唯一带评价的说法；实施那张「一层比一层清楚」反着念有点勉强。"},
+  {id:"k4", name:"自问一句", q:"多一句自问：真让我说清楚呢？", wide:true,
+   e:[[L("我知道自己要做什么功能。真让我说清楚呢，")],[L("也说不太上来：会遇到什么困难、该怎么设计、")],[L("最后做成什么样，都还是个大概。")]],
+   i:[[L("我知道自己要做什么功能。真让我说清楚呢，")],[L("也都说得上来：会遇到什么困难、该怎么设计、")],[L("最后做成什么样，心里都有数。")]],
+   strong:"最像自言自语：中间多一句「真让我说清楚呢」的自问，转身之后再给答案——跟原话里「仔细想想呢」是同一个动作，只是这次把转身说出声了。",
+   weak:"自问把句子拉成两半，后半截是冒号加罗列，读着有点像答问卷。"}
+];
+/* 现卡片（232 高、右栏 144px、一行 12 字）能放下的版本：把款二压成三行 */
+var NARROW={
+  id:"knarrow", name:"现卡片版", q:"卡片不动的话，款二压成三行",
+  e:[[L("我知道要做什么功能，")],[L("可是细节、难处、设计，")],[L("都还说不清。")]],
+  i:[[L("我知道要做什么功能，")],[L("细节、难处、设计，")],[L("都说得清。")]],
+  strong:"卡片保持 232 高，入口浮层和版式都不用动，信息也还全：细节、难处、设计、效果四样都在，只是没地方展开说。",
+  weak:"这是退路不是首选：三个短句装不下原话那种铺开说的口气，读着像结论，不像心里话。"
+};
+function renderWay(w,wide){
+  return '<div class="cards">'+
+    '<div class="cardcell"><div class="cl">'+w.name+' · 探索地图</div>'+cardFinal("explore",w.e,{wide:wide})+'</div>'+
+    '<div class="cardcell"><div class="cl">'+w.name+' · 实施地图</div>'+cardFinal("impl",w.i,{wide:wide})+'</div>'+
+    '</div><div class="notes"><dl>'+
+    '<dt>贴着原话的哪一点</dt><dd>'+w.q+'</dd>'+
+    '<dt>写法</dt><dd>探索：'+w.e.map(function(l){return l.map(function(r){return r.t;}).join("");}).join("")+
+      '　｜　实施：'+w.i.map(function(l){return l.map(function(r){return r.t;}).join("");}).join("")+'</dd>'+
+    '<dt>强在哪</dt><dd>'+w.strong+'</dd>'+
+    '<dt>弱在哪</dt><dd>'+w.weak+'</dd>'+
+    '</dl></div>';
+}
+WAYS.forEach(function(w){ document.getElementById(w.id).innerHTML = renderWay(w, w.wide); });
+document.getElementById("knarrow").innerHTML = renderWay(NARROW, false);
+document.getElementById("cmp").innerHTML=
+  '<table><tr><th style="width:88px">款</th><th style="width:180px">贴着原话的哪一点</th><th>探索地图的说法</th><th>实施地图的说法</th><th style="width:220px">强在哪</th><th style="width:220px">弱在哪</th></tr>'+
+  WAYS.map(function(w){
+    var e=w.e.map(function(l){return l.map(function(r){return r.t;}).join("");}).join(""),
+        i=w.i.map(function(l){return l.map(function(r){return r.t;}).join("");}).join("");
+    return '<tr><td style="color:#8b8b95">'+w.name+'</td><td>'+w.q+'</td><td class="p">'+e+'</td><td class="b">'+i+'</td><td style="color:#8b8b95">'+w.strong+'</td><td style="color:#8b8b95">'+w.weak+'</td></tr>';
+  }).join("")+
+  '<tr><td style="color:#8b8b95">现卡片版</td><td>卡片不动的话，款二压成三行</td>'+
+  '<td class="p">'+NARROW.e.map(function(l){return l.map(function(r){return r.t;}).join("");}).join("")+'</td>'+
+  '<td class="b">'+NARROW.i.map(function(l){return l.map(function(r){return r.t;}).join("");}).join("")+'</td>'+
+  '<td style="color:#8b8b95">卡片保持 232 高，浮层不用改；代价是那点空间只够三个短句，那种「铺开说」的感觉没了。</td>'+
+  '<td style="color:#8b8b95">这是退路，不是首选。</td></tr>'+'</table>';
+</script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+#!/usr/bin/env node
+/**
+ * 回归门禁：#530 拉取请求页签在 GitHub 数据下必须出现（中英文无关）。
+ *
+ * 背景：页签显示条件只看后端模块能力标记（prTabVisible），与语言无关；
+ * 中文曾验收通过（#506），现双语都不显示。
+ *
+ * 2026-10-12 改动：原先本文件末尾有三条「读构建产物文本、断言产物里必须出现某个字符串」的检查
+ *   （产物含 prTabVisible / 含词条键 panel.tabPr / tabs 行仍有 tabBtn('pr')）。这类检查断言的是
+ *   源码文本长成什么样，改一处写法就变红、却证明不了页签真的会显示，按维护者要求整类删掉。
+ *   留下的三条是渲染轨的存在性校验（组件注册成功、空态渲染不抛错、渲染出的标签行还在）。
+ *
+ * 为什么渲染轨只做存在性校验、不直接断言「GitHub 选择态下出现拉取请求页签」：
+ *   面板内容体是从插件自己的 React 上下文里取 store 的（旧文件第 129-131 行的注记已记下这一点），
+ *   本门禁在 jsdom 里渲染的是注册进来的原组件，喂不进自己的 store 夹具；这样渲染出来的是真实默认
+ *   store（选择态为空），断言「必须出现」会变成一条永远红的假门禁。真要在渲染层断言能力门控，
+ *   得先让门禁能替换组件取 store 的那条通道，那属于另一张票的事。
+ *
+ * 运行：node --import ./scripts/ts-hook.mts tests/verify-530-pr-tab.ts（先跑 node scripts/build.mts，保证产物新鲜）
+ */
+import { JSDOM } from 'jsdom'
+import { readFileSync } from 'node:fs'
+import React from 'react'
+import * as ReactDOMClient from 'react-dom/client'
+import { act } from 'react'
+// 本文件按文本求值统一走共用入口：产物在开了 runScripts 的 jsdom 窗口里跑，因此用 evalInWindow（理由与用法见 tests/lib/eval-probe.js 文件头）。
+import { evalInWindow } from './lib/eval-probe.js'
+(global as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
+
+const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div><textarea class="uV2eYG_input" style="width:780px"></textarea></body></html>', {
+  url: 'http://127.0.0.1:59519/',
+  runScripts: 'dangerously',
+})
+const { window } = dom
+const g = global as unknown as Record<string, unknown>
+g.window = window
+g.document = window.document
+try { g.navigator = window.navigator } catch (e) {}
+g.Node = window.Node
+g.HTMLElement = window.HTMLElement
+g.getComputedStyle = window.getComputedStyle
+g.requestAnimationFrame = window.requestAnimationFrame || ((cb: (...args: unknown[]) => void) => setTimeout(cb, 0))
+g.cancelAnimationFrame = window.cancelAnimationFrame || clearTimeout
+if (typeof window.ResizeObserver === 'undefined') {
+  (window as unknown as Record<string, unknown>).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
+}
+g.ResizeObserver = window.ResizeObserver
+if (!window.document.fonts) (window.document as unknown as Record<string, unknown>).fonts = { ready: Promise.resolve() }
+g.host = { call: async () => ({ ok: true }) }
+;(window as unknown as Record<string, unknown>).host = g.host
+;(window as unknown as Record<string, unknown>).React = React
+;(window as unknown as Record<string, unknown>).ReactDOM = ReactDOMClient
+g.React = React
+g.ReactDOM = ReactDOMClient
+
+let failures = 0
+const check = (ok: unknown, msg: string) => { console.log((ok ? '  PASS ' : '  FAIL ') + msg); if (!ok) failures++ }
+
+// 与 smoke-render 一致的宿主 stub；词条 zh+en 合并（同键英文覆盖中文，与线上一致）
+const dict: Record<string, string> = {}
+const trFn = (key: string, params?: Record<string, string | number>) => {
+  let s = dict[key] !== undefined ? dict[key] : key
+  if (params) s = s.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m))
+  return s
+}
+interface SlotRegistration { meta: { name?: string } | null; comp: unknown }
+const registrations: SlotRegistration[] = []
+const slots = {
+  register: (meta: { name?: string }, comp: unknown) => { registrations.push({ meta, comp }); return () => {} },
+  inject: (name: string, fn: () => void) => { try { fn() } catch (e) {} },
+}
+const services: Record<string, unknown> = {
+  slots,
+  // #646：原生右侧边栏类型登记表 —— 有它，本插件才会注册自己那条标签（面板内容体挂在它下面）
+  sidebarRightTabs: { register: () => () => {} },
+  connection: { rpc: { call: async () => ({ ok: true, value: { ok: true, maps: [], checks: [], ready: 0, total: 0 } }) } },
+  locale: { register: (ns: string, d: { zh?: Record<string, string>; en?: Record<string, string> }) => { Object.assign(dict, d.zh || {}, d.en || {}); return () => {} }, bind: () => trFn },
+  workspaces: { list: async () => [] },
+  sessions: { list: async () => [] },
+  timer: { timeout: (fn: (...args: unknown[]) => void, ms: number) => setTimeout(fn, ms) },
+}
+const ctx = {
+  get: (k: string) => services[k],
+  effect: (fn: () => unknown) => { const r = fn(); return typeof r === 'function' ? r : () => {} },
+  inject: (deps: unknown, cb: (c: unknown) => void) => { cb(ctx); return { dispose: () => {} } },
+}
+
+interface LoadedModule { factory: (req: (m: string) => unknown) => { apply: (c: unknown) => void } }
+let loaded: LoadedModule | null = null
+;(window as unknown as Record<string, unknown>).__ModuleLoader__ = { load(spec: LoadedModule) { loaded = spec; return spec } }
+const code: string = readFileSync('package/lib/client.js', 'utf8')
+// 构建产物要在窗口环境里执行：这里改走共用入口 evalInWindow，脚本里不再直接调窗口的求值入口。
+evalInWindow(dom, code)
+const mod = (loaded as LoadedModule).factory((m) => {
+  if (m === 'react') return React
+  if (m === 'react-dom') return ReactDOMClient
+  throw new Error('unexpected require: ' + m)
+})
+try { mod.apply(ctx) } catch (e) { console.log('  WARN apply threw:', (e as Error).message) }
+const byName = Object.fromEntries(registrations.map((r) => [r.meta && r.meta.name, r.comp]))
+// #646：面板内容体现在挂在右侧边栏那格槽位下（原来挂在 details 槽位，那条路已删）
+const DetailsDockComp = byName['sidebar.right.pane.tab']
+check(!!DetailsDockComp, 'DetailsDock 已注册可渲染')
+
+const htmlSmoke: string = await (async () => {
+  const container = window.document.createElement('div')
+  window.document.body.appendChild(container)
+  let root: { render: (el: any) => void; unmount: () => void } | null = null
+  try {
+    await act(async () => {
+      root = ReactDOMClient.createRoot(container)
+      root!.render(React.createElement(DetailsDockComp as React.ComponentType<Record<string, unknown>>, { sessionId: 'sid-530', session: { cwd: 'D:\\ws' }, useSessions: () => null }))
+    })
+    // #646 起这一格挂的是面板内容体，它是「先出空壳、下一帧再挂内容」的组件（#603）：
+    //   等它把内容挂上来再读 HTML（原来直接挂 DetailsDock，第一帧就有内容）。
+    for (let i = 0; i < 20; i++) {
+      await act(async () => { await new Promise((r) => setTimeout(r, 25)) })
+      if (container.innerHTML.includes('dsws-tabs')) break
+    }
+    return container.innerHTML
+  } catch (e) {
+    return 'RENDER-THREW:' + (e as Error).message
+  } finally {
+    try { if (root) root.unmount() } catch (e) {}
+    try { if (container.parentNode) container.parentNode.removeChild(container) } catch (e) {}
+  }
+})()
+check(typeof htmlSmoke === 'string' && !htmlSmoke.startsWith('RENDER-THREW'), 'DetailsDock 空态渲染不抛错')
+check(htmlSmoke.includes('dsws-tabs'), 'DetailsDock 渲染含标签行')
+
+console.log(failures ? '\n[verify-530-pr-tab] FAIL (' + failures + ' 项)' : '\n[verify-530-pr-tab] GREEN 页签门禁就绪')
+process.exit(failures ? 1 : 0)

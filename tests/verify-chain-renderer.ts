@@ -1,0 +1,242 @@
+/**
+ * tests/verify-chain-renderer.ts — #228 UI 链渲染器与动作分发器门禁
+ *
+ * 验收（#228）：
+ * - jsdom 冒烟：给定链数据渲染出对应横幅/表单；动作五种类型各执行一次；未知类型显示 unsupported
+ * - 真机：Markdown 不出现红卡；GitHub gh 未登录按钮=注入 prompt；登录成功后挂载点自动推进（重求值）
+ * - 形态：蓝/黄/红条同源渲染（互斥 42px Tab可达）、步进条、Form 内嵌、refresh 联动
+ *
+ * 运行：node tests/verify-chain-renderer.ts
+ */
+
+import { readFileSync, existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+import assert from 'node:assert'
+// 取源入口（tests/lib/source-text.ts）：src/client 下的同名 .js 是 pixel-ts 写下的构建产物（这一阶段要删），
+//   真源一律是同名 .ts；这里既按形态要求（minHeight 两种写法都认），也按原文要求（注释、单引号），
+//   所以先问 sourcePath 真源今天住在哪一份文件，再由下面的断言按需读它。
+import { sourcePath } from './lib/source-text.ts'
+// #1294：界面词表真源搬去 config/copy/ 并由生成器产出 locale-data.ts（不入库）。旧门禁里
+//   「读某一族 locale-*.js 原文」的判据统一经这个入口取生成物的对应分段，换算只写在一处。
+import { familySectionSource } from './lib/locale-data.ts'
+
+const root = resolve(import.meta.dirname, '..')
+let passed=0, failed=0
+function check(ok, msg){ if(ok){ console.log('  PASS '+msg); passed++; } else { console.log('  FAIL '+msg); failed++; } }
+// 只把 src/client 这一层改指真源：src/shared、src/host、src/tracker 等目录的 .js 产物这一阶段还留着，读法不动。
+function resolvedPath(p){ const rel = p.replace(/\\/g,'/'); return resolve(root, rel.startsWith('src/client/') && rel.endsWith('.js') ? sourcePath(rel) : rel) }
+function file(p){ return readFileSync(resolvedPath(p),'utf8') }
+
+console.log('== #228 链渲染器与动作分发器 ==')
+console.log('')
+console.log('-- 1) 真源存在与形状 --')
+const crPath = resolvedPath('src/client/views/shared/ChainRenderer.js')
+check(existsSync(crPath), 'ChainRenderer 真源存在')
+const cr = existsSync(crPath) ? file('src/client/views/shared/ChainRenderer.js') : ''
+check(cr.includes('CHAIN_RENDERER_VERSION'), 'ChainRenderer 含版本标识')
+check(cr.includes('ChainBanner'), 'ChainRenderer 含 ChainBanner')
+check(cr.includes('ChainRenderer'), 'ChainRenderer 含 ChainRenderer')
+check(cr.includes('ChainSteps'), 'ChainRenderer 含 ChainSteps')
+check(cr.includes('ChainForm'), 'ChainRenderer 含 ChainForm')
+check(!cr.includes('checksToChainSnapshot'), '#284：checks→chain 适配器已随九格目录视图退役')
+check(cr.includes('isSupportedActionType'), '含 isSupportedActionType')
+
+console.log('')
+console.log('-- 2) 横幅同源互斥 42px Tab可达 --')
+// #1253 转 TypeScript 后，这里读的是 .ts 真源（同名 .js 是 esbuild 产物，这一阶段要删），
+// 但两种写法在真源里都出现过，所以两种都认；字面量有没有被改坏由 tests/verify-leaves.ts 与门禁守。
+check((cr.includes('minHeight: 42') || cr.includes('minHeight:42')) && (cr.includes('maxHeight: 42') || cr.includes('maxHeight:42')), '横幅 42px 约束')
+check(cr.includes('tabIndex:0') || cr.includes('tabIndex'), '横幅 Tab 可达')
+check(cr.includes('role:') && cr.includes('status'), '横幅含 role/status 可达')
+check(cr.includes('levelToClass') && cr.includes('levelToStyle'), '含 level→样式 映射')
+check(cr.includes('dsws-chain-banner'), '含 dsws-chain-banner 类')
+check(cr.includes('互斥') || cr.includes('currentIndex') , '互斥 current 唯一')
+
+console.log('')
+console.log('-- 3) 动作分发器五种 + unknown --')
+const actionsPath = resolvedPath('src/client/kernel/actions.js')
+const actions = existsSync(actionsPath) ? file('src/client/kernel/actions.js') : ''
+check(actions.includes('INJECT_PROMPT') || actions.includes('inject-prompt'), 'actions 含 inject-prompt')
+check(actions.includes('OPEN_URL') || actions.includes('open-url'), 'actions 含 open-url')
+check(actions.includes('RPC') || actions.includes("'rpc'") || actions.includes('"rpc"') || actions.includes('RPC'), 'actions 含 rpc')
+check(actions.includes('FORM') || actions.includes('form'), 'actions 含 form')
+check(actions.includes('REFRESH') || actions.includes('refresh'), 'actions 含 refresh')
+check(actions.includes('unsupported') , 'actions 含 unsupported 诚实失败')
+check(file('src/client/views/shared/ChainRenderer.js').includes('unsupported'), 'ChainRenderer 含 unsupported 展示')
+
+// 运行时：dispatcher 5 种 + unknown
+try{
+  const { createActionDispatcher } = await import('../src/client/kernel/actions.js')
+  const calls=[]
+  const ctx={
+    inject: async (t)=>{ calls.push('inject:'+t.slice(0,20)) },
+    openUrl: (u)=>{ calls.push('open:'+u) },
+    hostCall: async (m,p)=>{ calls.push('rpc:'+m); return {ok:true} },
+    renderForm: async (schema, cb)=>{ calls.push('form:'+schema.length); await cb({name:'test'}) },
+    refresh: async ()=>{ calls.push('refresh') },
+    tr: (k)=>k,
+    resolvePrompt: async (id)=>id
+  }
+  const disp = createActionDispatcher(ctx)
+  const r1 = await disp.dispatch({type:'inject-prompt', prompt:'setupRun'})
+  check(r1.ok===true, 'dispatcher inject-prompt 执行')
+  const r2 = await disp.dispatch({type:'open-url', url:'https://example.com'})
+  check(r2.ok===true, 'dispatcher open-url 执行')
+  const r3 = await disp.dispatch({type:'rpc', method:'wf.logGetSwitch', params:{}})
+  check(r3.ok===true, 'dispatcher rpc 执行')
+  const r4 = await disp.dispatch({type:'form', schema:[{name:'name', label:'Name', required:true}], submitAction:{type:'rpc', method:'wf.initPublish'}})
+  check(r4.ok===true, 'dispatcher form 执行')
+  const r5 = await disp.dispatch({type:'refresh', target:'chain'})
+  check(r5.ok===true, 'dispatcher refresh 执行')
+  const r6 = await disp.dispatch({type:'unknown-type', foo:1})
+  check(r6.ok===false && r6.error && r6.error.kind==='unsupported', 'dispatcher unknown → unsupported')
+  check(calls.length>=6, 'dispatcher 6 次调用均记录')
+}catch(e){
+  check(false, 'dispatcher 运行时异常: '+e.message)
+}
+
+console.log('')
+console.log('-- 4) Form 渲染位置与校验（#308：横幅不再内嵌，改走 modal-seat 弹窗） --')
+check(cr.includes('schema'), 'ChainForm 含 schema')
+// 2026-10-17 重锚（原来是钉硬字 `必填`）：必填校验的真机制是「判 f.required 再取词条
+// env.formRequired」，硬字早已搬进词条表。这里改钉机制本身 + 词条中英都在，
+// 谁把校验删掉或把词条挪走都会当场红。
+// #1253：这里读的是 .ts 真源（同名 .js 是产物，这一阶段要删，产物会丢注释、改引号）；
+// 词条键里的点按字面转义，真源与产物都可能是单/双引号，所以用「两种引号都认」的正则而不是精确子串。
+check(cr.includes('f.required') && /tr\(["']env\.formRequired["']/.test(cr), 'ChainForm 必填校验走词条 env.formRequired（不再钉硬字）')
+// #1294：词表真源搬去 config/copy/，旧片段 locale-panel.ts 已不存在，词条住在生成物
+//   src/client/kernel/locale-data.ts 的 panel 分段（真源 config/copy/panel.yaml）。判据（键中英各一条、
+//   中文含「必填」）一字不动，只把「从旧文件原文取」换成「从生成物的那一族分段取」。
+const localePanelSrc = familySectionSource('panel')
+// 判据语义：这个词条在中文表、英文表里各有一条，且中文那条含「必填」。生成物的分段比旧片段多一行
+//   「键联合」声明（type LocaleKeyPanel = ... | 'env.formRequired' | ...），所以不数总出现次数，
+//   而是要求两种语言的赋值行都在、且中文写法带「必填」——旧判据意在被这两点钉住，不是钉行数。
+const formRequiredLines = localePanelSrc.split('\n').filter((l) => l.indexOf("'env.formRequired'") >= 0)
+check(
+  formRequiredLines.some((l) => l.indexOf("'env.formRequired': '{label} 必填'") >= 0) &&
+    formRequiredLines.some((l) => l.indexOf("'env.formRequired': '{label} is required'") >= 0),
+  '词条 env.formRequired 中英各一条、中文含「必填」'
+)
+check(cr.includes('pattern') && cr.includes('RegExp'), 'ChainForm 含 pattern 校验')
+check(cr.includes('submitAction') , 'ChainForm 含 submitAction')
+check(cr.includes('onSubmit'), 'ChainForm 含 onSubmit')
+// #308：form 不再内嵌于横幅/ChainRenderer，改为 modal-seat 弹窗（用户点击才弹）
+const rendererBody = cr.slice(cr.indexOf('export const ChainRenderer'), cr.indexOf('export const ChainRenderer')+3000)
+check(!rendererBody.includes('h(ChainForm'), 'ChainRenderer 不再内嵌 ChainForm（#308 form 改走 modal-seat）')
+const ctForForm = file('src/client/views/ChecksTab.js')
+// 2026-09-21 搬家：座位从检查页搬到状态栏（面板没开时那一页不在树上，点按钮什么都不会发生）。
+//   这一条改指状态栏，并反过来钉住检查页不再挂。
+check(file('src/client/statusbar/StatusBar.js').includes('FormModalSeat'), 'StatusBar 接入 FormModalSeat（form 走弹窗）')
+check(!ctForForm.includes('FormModalSeat'), 'ChecksTab 不再挂 FormModalSeat（防两处同挂）')
+const srForForm = ['src/client/kernel/slotRenderer-queue.js','src/client/kernel/slotRenderer-repo-sync.js','src/client/kernel/slotRenderer-modal-view.js'].map(file).join('\n') // 顺带 454 遗留：slotRenderer.js 已拆为三文件，读三文件拼起来的内容断言
+check(srForForm.includes('FormModalSeat') && srForForm.includes('dsws-modal'), 'slotRenderer 含 FormModalSeat 弹窗（含 .dsws-modal）')
+
+console.log('')
+console.log('-- 5) gh 登录黄条 inject-prompt 替换 openUrl（#308 修陈旧断言：bc72e16 迁移至后端 fixes） --')
+// 2026-10-21：登录引导单源化 —— 提示词真源里那条旧的 ghAuthLogin 模板已删除（用户可见的只有
+//   后端声明的那一句），所以这里不再问 config/prompts/*.yaml，改由下面两条接住：
+//   状态栏按当前后端/通用 hint 解析、后端声明含 ghAuthLogin（见本节末尾）。
+//   2026-10-17 也曾删掉「模板含 gh auth login 文案」一条，理由相同：硬字 `gh` 只该活在后端声明里。
+// #308 修陈旧断言：bc72e16 后修复指引迁入后端 fixes（host/index.js 不再硬编码 prompt:ghAuthLogin，ChecksTab 不再硬编码 promptText 调用）
+const checksTab = file('src/client/views/ChecksTab.js')
+check(checksTab.includes('hintTextOf') && checksTab.includes('resolvePrompt'), 'ChecksTab 走通用 hint 解析（不再硬编码 ghAuthLogin，承接 fixContract）')
+check(!checksTab.includes("openUrl('https://cli.github.com/manual/gh_auth_login')") , 'ChecksTab 已删除 gh_auth_login openUrl 硬编码')
+// #663：状态栏那颗按钮的注入搬去了 statusbar/bannerChain.js（横幅链），ghAuthLogin 这个名字现在写在
+//   共享步骤清单（src/shared/tracker/guide-steps.js）的 missing.prompt 上，由 bannerChain 按当前后端解析成完整指引。
+//   三份文件一起读，断言的主体没变：登录那颗按钮注入的是后端声明的指引，而不是外链官网。
+const statusBar = file('src/client/statusbar/StatusBar.js') + file('src/client/statusbar/bannerChain.js') + file('.build/shared/tracker/guide-steps.js')
+check(statusBar.includes("promptText('ghAuthLogin')") || statusBar.includes('ghAuthLogin') || statusBar.includes('hintTextOf'), 'StatusBar 含 ghAuthLogin 或通用 hint（兼容）')
+check(!statusBar.includes("openUrl('https://cli.github.com/manual/gh_auth_login')"), 'StatusBar 已删除 openUrl 硬编码')
+const ghBackend = file('src/tracker/rooms/github/index.ts')
+check(ghBackend.includes('ghAuthLogin'), 'github 后端 fixes 含 ghAuthLogin（bc72e16 迁移真源）')
+const fixContract = file('src/tracker/fix-contract.ts')
+check(fixContract.includes('attachFixContract'), 'fixContract 存在并处理 prompt 解析')
+const host = file('src/host/index.ts')
+check(host.includes('attachFixContract') || host.includes('fixContract') || host.includes("wf.chain"), 'host 已接入 fixContract / wf.chain（hint 不再硬编码在 host）')
+check(!host.includes("'https://cli.github.com/manual/gh_auth_login'") || host.split('prompt:ghAuthLogin').length>2, 'host 已无残留 URL 硬编码为主')
+
+console.log('')
+console.log('-- 6) 红卡替换与 Markdown 隔离 --')
+const noRepo = file('src/client/views/NoRepoCard.js')
+check(noRepo.includes('markdown') && noRepo.includes('Markdown 工作区不出现红卡') || noRepo.includes('bidNoRepo'), 'NoRepoCard 含 markdown 隔离')
+check(noRepo.includes('ChainRenderer') || noRepo.includes('chainSnap'), 'NoRepoCard 含 chain 委托')
+const listTab = file('src/client/views/ListTab.js')
+check(!listTab.includes('h(NoRepoCard'), 'ListTab 已移除全屏红卡挂载（B Timeline 定版 2026-08-28：行内红卡表达，顶部无错误信息）')
+
+console.log('')
+console.log('-- 7) 重求值联动 --')
+const probe = ['src/client/kernel/probe-chain.js','src/client/kernel/probe-snapshot.js','src/client/kernel/probe-auto.js'].map(file).join('\n') // 456 收尾：probe.js 已拆为三文件，读三文件拼起来的内容断言
+check(probe.includes('loadChain'), 'probe 含 loadChain')
+check(probe.includes('wf.chain'), 'probe 调用 wf.chain')
+check(probe.includes('loadChain(st, true') , 'refreshAll 联动 loadChain')
+const host2 = file('src/host/index.ts')
+check(host2.includes("harness.handle('wf.chain'"), 'host 含 wf.chain handler')
+// 2026-10-17 删掉两条按旧符号名扫 host 源码的断言（resolveGenericChain /
+// registerGenericPredicates）：这两个符号已搬到 src/host/tracker/generic.js，被
+// detectChain 消费；真牙齿在 tests/verify-generic-catalog.ts（真 import 真调用）。
+// 重锚成新名字只是把文本扫描换个词，零新增牙齿；接线本身由 verify-chain-env-e2e 真跑。
+
+console.log('')
+console.log('-- 8) jsdom 横幅/表单冒烟 --')
+try{
+  const { JSDOM } = await import('jsdom')
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url:'http://127.0.0.1:59519/'})
+  global.window = dom.window
+  global.document = dom.window.document
+  // global.navigator is read-only in newer jsdom, skip direct assignment
+  try{ Object.defineProperty(global, 'navigator', { value: dom.window.navigator, configurable:true }) }catch(e){}
+  global.Node = dom.window.Node
+  global.HTMLElement = dom.window.HTMLElement
+  global.getComputedStyle = dom.window.getComputedStyle
+  global.requestAnimationFrame = dom.window.requestAnimationFrame || ((cb)=>setTimeout(cb,0))
+  global.ResizeObserver = class{ observe(){} unobserve(){} disconnect(){} }
+  const ReactMod = await import('react')
+  const React = ReactMod.default || ReactMod
+  global.React = React
+  globalThis.React = React
+  const ReactDOMClient = await import('react-dom/client')
+  const { act } = await import('react')
+  // 构造最小 snapshot
+  const snapshot = {
+    steps: [
+      { id:'a', status:'done', show:{fallback:'已完成', level:'info'}, actions:[], isApplicable:true, isCurrent:false, isBlocking:false },
+      { id:'b', status:'current', show:{fallback:'需登录', desc:'运行 gh auth login', level:'warn'}, actions:[{type:'inject-prompt', prompt:'ghAuthLogin'}], isApplicable:true, isCurrent:true, isBlocking:true },
+      { id:'c', status:'pending', show:{fallback:'待定', level:'info'}, actions:[], isApplicable:true, blockedBy:'b', isCurrent:false, isBlocking:false }
+    ],
+    currentIndex:1, doneCount:1, applicableCount:3, totalCount:3, chainState:'hasCurrent', version:'1'
+  }
+  // #284：适配器测试撤销；链快照形态由契约层 chain.js evaluateChain 自证（见 verify-chain.ts）
+  // 渲染 ChainRenderer（需要 DswsCtx 与 dispatcher）
+  const { DswsCtx, createCx } = await import('../src/client/kernel/ctx.js')
+  const { createActionDispatcher } = await import('../src/client/kernel/actions.js')
+  const calls2=[]
+  const mockCtx={ inject: async(t)=>{calls2.push(t)}, openUrl: (u)=>{calls2.push(u)}, hostCall: async()=>{calls2.push('host')}, renderForm: async()=>{calls2.push('renderForm')}, refresh: async()=>{calls2.push('refresh')}, tr:(k)=>k }
+  const disp2 = createActionDispatcher(mockCtx)
+  // 真行为：带 form 的动作经分发器走 renderForm 那条路（不再是自证夹具字面量）
+  const r7 = await disp2.dispatch({type:'form', schema:[{name:'name', label:'仓库名', required:true}], submitAction:{type:'rpc', method:'wf.initPublish'}})
+  check(r7.ok===true, 'dispatcher form（带必填项）执行')
+  check(calls2.includes('renderForm'), 'form 分发确实走 renderForm 那条路')
+  // Markdown 隔离：catalogFor 隔离
+  const { catalogFor } = await import('../src/shared/tracker/check-catalog-dirs.js')
+  const mdCats = catalogFor('markdown')
+  const ghCats = catalogFor('github')
+  check(!mdCats.some(c=>c.id==='gh:installed'), 'markdown 目录无 gh:installed')
+  check(ghCats.some(c=>c.id==='gh:installed'), 'github 目录含 gh:installed')
+  check(mdCats.some(c=>c.id==='md:scratchWritable'), 'markdown 目录含 md:scratchWritable')
+}catch(e){
+  check(false, 'jsdom 冒烟异常: '+e.message + ' ' + e.stack?.split('\n')[0])
+}
+
+console.log('')
+console.log('-- 9) 五座位边界与契约四态 --')
+try{
+  const { CHECK_STATE, ACTION_TYPE } = await import('../src/shared/tracker/chain-types.js')
+  check(CHECK_STATE.DONE==='done' && CHECK_STATE.CURRENT==='current' && CHECK_STATE.FAIL==='fail' && CHECK_STATE.PENDING==='pending', '四态 done/current/fail/pending')
+  check(!('NA' in CHECK_STATE) && !('na' in CHECK_STATE), '无 NA 状态')
+  check(Object.values(ACTION_TYPE).includes('inject-prompt') && Object.values(ACTION_TYPE).includes('refresh'), 'ACTION_TYPE 含 5 种')
+}catch(e){ check(false, '契约四态异常: '+e.message)}
+
+console.log('')
+console.log(`-- 汇总 --`)
+console.log(`total=${passed+failed} passed=${passed} failed=${failed}`)
+if(failed) process.exit(1)
