@@ -26,17 +26,58 @@ jobs:
         run: |
           set -e
           REPO="FeatherHunter/dsh-mattpocock-skills-deck"
-          # 不吞退出码：拉取失败就让这一步红，别把「没拉到」伪装成「没有新数据」而直接跳过。
-          gh api -H "Accept: application/vnd.github.star+json" "repos/$REPO/stargazers" --paginate --jq ".[].starred_at" > /tmp/stars.txt
-          if [ ! -s /tmp/stars.txt ]; then echo "No stars fetched"; exit 0; fi
-          OLD_TOTAL=$(node -e "const fs=require('fs');try{const d=JSON.parse(fs.readFileSync('docs/star-history.json','utf8'));process.stdout.write(String(d[d.length-1]?.total??0))}catch{process.stdout.write('0')}")
-          node scripts/update-star-history.mts /tmp/stars.txt
-          # 星标总数只增不减；总数变小说明这次分页没拉全（限流、网络、中途失败），
-          # 宁可这一次不提交，也不要把图画出一个向下的坑。
-          NEW_TOTAL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/star-history.json','utf8'));process.stdout.write(String(d[d.length-1]?.total??0))")
-          if [ "$NEW_TOTAL" -lt "$OLD_TOTAL" ]; then
-            echo "::error::这次拉到的星标总数是 $NEW_TOTAL，比上次落盘的 $OLD_TOTAL 还少，可能是分页没拉全；已停止，不提交残缺数据。"
-            exit 1
+          # 先尝试拉 stargazers 列表（带时间戳，可精确到天）。
+          # 2026-10-30 起该接口持续失败（GITHUB_TOKEN 拿 403、个人 token 拿 404），
+          # 此时降级：用仓库元数据的 stargazers_count 作为当日总数继续更新。
+          # 代价是丢掉按天时间戳粒度（daily 退化成与上次落盘数的差值），但图表不断更。
+          if gh api -H "Accept: application/vnd.github.star+json" "repos/$REPO/stargazers" --paginate --jq ".[].starred_at" > /tmp/stars.txt 2>/tmp/stars.err; then
+            MODE=list
+          else
+            echo "stargazers 列表拉取失败，降级用仓库元数据 stargazers_count 兜底：$(head -c 300 /tmp/stars.err | tr '\n' ' ')"
+            MODE=count
+          fi
+          if [ "$MODE" = list ]; then
+            if [ ! -s /tmp/stars.txt ]; then echo "No stars fetched"; exit 0; fi
+            OLD_TOTAL=$(node -e "const fs=require('fs');try{const d=JSON.parse(fs.readFileSync('docs/star-history.json','utf8'));process.stdout.write(String(d[d.length-1]?.total??0))}catch{process.stdout.write('0')}")
+            node scripts/update-star-history.mts /tmp/stars.txt
+            # 星标总数只增不减；总数变小说明这次分页没拉全（限流、网络、中途失败），
+            # 宁可这一次不提交，也不要把图画出一个向下的坑。
+            NEW_TOTAL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/star-history.json','utf8'));process.stdout.write(String(d[d.length-1]?.total??0))")
+            if [ "$NEW_TOTAL" -lt "$OLD_TOTAL" ]; then
+              echo "::error::这次拉到的星标总数是 $NEW_TOTAL，比上次落盘的 $OLD_TOTAL 还少，可能是分页没拉全；已停止，不提交残缺数据。"
+              exit 1
+            fi
+          else
+            # 兜底路径：元数据总数追加为当日一条。同一天重复跑则原地更新当日总数。
+            # 同样遵守"只增不减"：元数据总数若小于上次落盘数，拒绝提交（红）。
+            STAR_COUNT=$(gh api "repos/$REPO" --jq .stargazers_count)
+            echo "stargazers_count=$STAR_COUNT（兜底模式）"
+            STAR_COUNT="$STAR_COUNT" node -e "
+              const fs = require('fs');
+              const p = 'docs/star-history.json';
+              let d = [];
+              try { d = JSON.parse(fs.readFileSync(p, 'utf8')); } catch {}
+              if (!Array.isArray(d)) d = [];
+              const today = new Date().toISOString().slice(0, 10);
+              const count = Number(process.env.STAR_COUNT);
+              if (!Number.isFinite(count)) { console.error('::error::stargazers_count 不是数字'); process.exit(1); }
+              const last = d[d.length - 1];
+              const lastTotal = Number(last?.total ?? 0);
+              if (count < lastTotal) {
+                console.error('::error::仓库元数据 stargazers_count=' + count + ' 小于上次落盘总数 ' + lastTotal + '，拒绝提交残缺数据。');
+                process.exit(1);
+              }
+              if (last && last.date === today) {
+                const prevTotal = Number(d[d.length - 2]?.total ?? 0);
+                last.total = count;
+                last.daily = Math.max(0, count - prevTotal);
+                console.log('更新当日：', today, 'total', count);
+              } else {
+                d.push({ date: today, total: count, daily: Math.max(0, count - lastTotal) });
+                console.log('追加当日：', today, 'total', count);
+              }
+              fs.writeFileSync(p, JSON.stringify(d, null, 2) + '\n');
+            "
           fi
           node scripts/generate-star-history-svg.mts
       - name: Bump README cache stamp
